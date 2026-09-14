@@ -489,7 +489,8 @@ Also thinking about renaming since Marble is already taken by other stuff...
 
 
 ## Devlog #25 ->
-I tried searching up the name of my app for giggles and turns out a lot of things are named Marble. I spent this whole time changing the name to Marble. Kind of random I know. I'm a little sad but it's okay! I think I like this name more anyway.
+I tried searching up the name of my app for giggles and turns out a lot of things are named RoboLens. I spent this whole time changing the name to Marble. I'm a little sad but it's okay! I think I like this name more anyway.
+I have also been working on the AI scanning. I know I said that it won't be very helpful to teams but I still need it to be highly functional if people are going to be using it.
 
 ![alt text](photos/image42.png)
 
