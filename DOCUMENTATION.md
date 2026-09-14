@@ -490,3 +490,17 @@ Also thinking about renaming since Marble is already taken by other stuff...
 
 ## Devlog #25 ->
 I tried searching up the name of my app for giggles and turns out a lot of things are named Marble. I spent this whole time changing the name to Marble. Kind of random I know. I'm a little sad but it's okay! I think I like this name more anyway.
+
+![alt text](photos/image42.png)
+
+## Devlog #26 ->
+I forgot to add the timer for Marble into my project (because I thought it was RoboLens) so I didn't see that it was going over 10 hours!
+I changed the cursor to be able to click (Comment was "pointer to every buttons of your app, because without it users could get lost"). It was pretty easy all I had to do was create a tap_cursor.dart file and implement that change into the files that need access to it:
+TapCursor(
+  onTap: () => Navigator.pop(ctx),
+  child: Icon(Icons.close, color: Colors.grey[400], size: 20),
+)
+Most of the time, (like more than 50%) has been me working on the AI scanner. I've been trying to make it so it is way more accurate and doesn't highlight things that aren't on the robot. That should be in my next devlog!
+
+![alt text](photos/image44.png)
+![alt text](photos/image43.png)
