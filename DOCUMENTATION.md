@@ -518,5 +518,5 @@ P.S. I plan to remake the whole system because the issue seems to not be with th
 
 
 ## Devlog #28 ->
-Not really a code update, but I just wanted to show the data I have collected!!
-I have 250+ views, 100+ new users, and 100+ scans logged! I am very happy that I am getting people to view my app and even try it out! Thank you to everyone here who did!
+Not really a code update, but I just wanted to show the data I have collected!
+I have 250+ views, 100+ new users, and 100+ scans logged! I am very happy that I am getting people to view my app and even try it out!
