@@ -169,6 +169,13 @@ List<List<RoughFinding>> clusterFindings(
   );
 }
 
+// The detect pass only gives a rough point, not a precise location, so
+// the crop we localize against needs enough slack around that point to
+// tolerate the guess being a bit off. A lone finding gets a generous
+// minimum crop size for that reason; a cluster of several nearby findings
+// can trust its own spread more and doesn't need as much extra padding.
+const double _minRegionFraction = 0.45;
+
 CropRegion regionForCluster(
   List<RoughFinding> cluster, {
   double padding = clusterPadding,
@@ -180,15 +187,33 @@ CropRegion regionForCluster(
 
   var width = (maxX - minX) + padding * 2;
   var height = (maxY - minY) + padding * 2;
-  width = width.clamp(0.3, 1.0);
-  height = height.clamp(0.3, 1.0);
+  width = width.clamp(_minRegionFraction, 1.0);
+  height = height.clamp(_minRegionFraction, 1.0);
 
-  var x = minX - padding;
-  var y = minY - padding;
+  final centerX = (minX + maxX) / 2;
+  final centerY = (minY + maxY) / 2;
+  var x = centerX - width / 2;
+  var y = centerY - height / 2;
   x = x.clamp(0.0, 1.0 - width);
   y = y.clamp(0.0, 1.0 - height);
 
   return CropRegion(x: x, y: y, width: width, height: height);
+}
+
+// A localized box that comes back implausibly small relative to the full
+// photo is more likely a failed/uncertain guess than a real find — real
+// robot components don't map to a sliver a couple percent wide at this
+// resolution. Treat those as "not confidently located" rather than
+// drawing a stray dot on the photo.
+const double _minPlausibleBoxFraction = 0.03;
+
+BoundingBox? discardImplausiblyTinyBox(BoundingBox? box) {
+  if (box == null) return null;
+  if (box.width < _minPlausibleBoxFraction ||
+      box.height < _minPlausibleBoxFraction) {
+    return null;
+  }
+  return box;
 }
 
 bool _isRetryableAiError(Object error) {
@@ -278,7 +303,7 @@ class AiService {
           title: f.title,
           description: f.description,
           severity: f.severity,
-          box: mapBoxFromCropToFull(box2d, region),
+          box: discardImplausiblyTinyBox(mapBoxFromCropToFull(box2d, region)),
           isReported: false,
         ));
       }
