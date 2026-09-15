@@ -511,3 +511,12 @@ This took awhile. And I mean awhile. I had to continuously change code to make t
 Alas, I have gotten some progress though! Look at the photos below to see the progress:
 P.S. I plan to remake the whole system because the issue seems to not be with the code but with the whole functionality.
 
+![alt text](photos/image45.png)
+![alt text](photos/image46.png)
+![alt text](photos/image47.png)
+![alt text](photos/image48.png)
+
+
+## Devlog #28 ->
+Not really a code update, but I just wanted to show the data I have collected!!
+I have 250+ views, 100+ new users, and 100+ scans logged! I am very happy that I am getting people to view my app and even try it out! Thank you to everyone here who did!
