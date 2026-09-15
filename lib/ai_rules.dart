@@ -16,7 +16,7 @@ import 'ai_scan.dart'
         regionForCluster,
         prioritizeClusters,
         mapBoxFromCropToFull,
-        discardImplausiblyTinyBox,
+        sanitizeLocalizedBox,
         parseSeverity,
         scaleCoord,
         mergeOverlappingFindings,
@@ -92,13 +92,12 @@ class AiRulesService {
           title: f.title,
           description: f.description,
           severity: f.severity,
-          box: discardImplausiblyTinyBox(mapBoxFromCropToFull(box2d, region)),
+          box: sanitizeLocalizedBox(mapBoxFromCropToFull(box2d, region)),
           isReported: false,
         ));
       }
     }
 
-    
     for (final cluster in leftover) {
       for (final f in cluster) {
         located.add(Finding(

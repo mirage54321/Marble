@@ -109,6 +109,7 @@ const int maxLocalizeClusters = 6;
 const double clusterDistanceThreshold = 0.2;
 const double clusterPadding = 0.1;
 
+
 List<List<RoughFinding>> clusterFindings(
   List<RoughFinding> findings, {
   double threshold = clusterDistanceThreshold,
@@ -187,13 +188,37 @@ CropRegion regionForCluster(
 
 
 const double _minPlausibleBoxFraction = 0.03;
+const double _maxPlausibleBoxFraction = 0.6;
+const double _maxPlausibleAspectRatio = 5.0;
 
-BoundingBox? discardImplausiblyTinyBox(BoundingBox? box) {
+
+BoundingBox? sanitizeLocalizedBox(BoundingBox? box) {
   if (box == null) return null;
+
   if (box.width < _minPlausibleBoxFraction ||
       box.height < _minPlausibleBoxFraction) {
     return null;
   }
+  if (box.width > _maxPlausibleBoxFraction ||
+      box.height > _maxPlausibleBoxFraction) {
+    return null;
+  }
+
+  final aspectRatio = box.width > box.height
+      ? box.width / box.height
+      : box.height / box.width;
+  if (aspectRatio > _maxPlausibleAspectRatio) {
+    return null;
+  }
+
+  const tolerance = 0.02;
+  if (box.x < -tolerance ||
+      box.y < -tolerance ||
+      box.x + box.width > 1.0 + tolerance ||
+      box.y + box.height > 1.0 + tolerance) {
+    return null;
+  }
+
   return box;
 }
 
@@ -284,12 +309,11 @@ class AiService {
           title: f.title,
           description: f.description,
           severity: f.severity,
-          box: discardImplausiblyTinyBox(mapBoxFromCropToFull(box2d, region)),
+          box: sanitizeLocalizedBox(mapBoxFromCropToFull(box2d, region)),
           isReported: false,
         ));
       }
     }
-
 
     for (final cluster in leftover) {
       for (final f in cluster) {
