@@ -105,14 +105,21 @@ double scaleCoord(dynamic v) {
   return (n / 1000.0).clamp(0.0, 1.0);
 }
 
-const int maxLocalizeClusters = 4;
-const double clusterDistanceThreshold = 0.35;
-const double clusterPadding = 0.12;
+const int maxLocalizeClusters = 6;
+const double clusterDistanceThreshold = 0.2;
+const double clusterPadding = 0.1;
 
+// Groups nearby findings so we can send one zoomed-in crop per cluster for
+// precise localization. Findings are only merged when they're genuinely
+// close together — we never force a distant finding into an unrelated
+// cluster just to keep the cluster count down, since that stretches the
+// crop region to cover both and ruins localization precision for everyone
+// in it. Any overflow past maxLocalizeClusters is capped later, by simply
+// skipping localization for the least significant clusters (see
+// prioritizeClusters), not by merging them into the wrong place.
 List<List<RoughFinding>> clusterFindings(
   List<RoughFinding> findings, {
   double threshold = clusterDistanceThreshold,
-  int maxClusters = maxLocalizeClusters,
 }) {
   final clusters = <List<RoughFinding>>[];
 
@@ -134,10 +141,7 @@ List<List<RoughFinding>> clusterFindings(
       }
     }
 
-    final withinThreshold = bestDistSq < threshold * threshold;
-    final atCapacity = clusters.length >= maxClusters;
-
-    if (bestCluster != null && (withinThreshold || atCapacity)) {
+    if (bestCluster != null && bestDistSq < threshold * threshold) {
       bestCluster.add(f);
     } else {
       clusters.add([f]);
@@ -145,6 +149,24 @@ List<List<RoughFinding>> clusterFindings(
   }
 
   return clusters;
+}
+
+// Splits clusters into the ones worth spending a localize API call on (the
+// biggest / most numerous first) and the leftover ones we'll show without a
+// precise box rather than mangling an unrelated cluster's crop region.
+({List<List<RoughFinding>> toLocalize, List<List<RoughFinding>> leftover})
+    prioritizeClusters(
+  List<List<RoughFinding>> clusters, {
+  int maxClusters = maxLocalizeClusters,
+}) {
+  final sorted = [...clusters]..sort((a, b) => b.length.compareTo(a.length));
+  if (sorted.length <= maxClusters) {
+    return (toLocalize: sorted, leftover: const []);
+  }
+  return (
+    toLocalize: sorted.sublist(0, maxClusters),
+    leftover: sorted.sublist(maxClusters),
+  );
 }
 
 CropRegion regionForCluster(
@@ -233,10 +255,11 @@ class AiService {
 
     if (roughFindings.isEmpty) return [];
 
-    final clusters = clusterFindings(roughFindings);
+    final rawClusters = clusterFindings(roughFindings);
+    final (:toLocalize, :leftover) = prioritizeClusters(rawClusters);
     final located = <Finding>[];
 
-    for (final cluster in clusters) {
+    for (final cluster in toLocalize) {
       final region = regionForCluster(cluster);
       final crop = cropToRegion(imageBytes, region);
 
@@ -256,6 +279,21 @@ class AiService {
           description: f.description,
           severity: f.severity,
           box: mapBoxFromCropToFull(box2d, region),
+          isReported: false,
+        ));
+      }
+    }
+
+    // Findings that didn't make the localization cut still show up in the
+    // list, just without a bounding box, instead of forcing them into an
+    // unrelated cluster's crop and drawing a wrong/oversized box.
+    for (final cluster in leftover) {
+      for (final f in cluster) {
+        located.add(Finding(
+          title: f.title,
+          description: f.description,
+          severity: f.severity,
+          box: null,
           isReported: false,
         ));
       }

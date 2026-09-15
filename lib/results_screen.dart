@@ -508,6 +508,9 @@ class _BoxPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final imageRect = _containedImageRect(size);
+    // Tracks label badges already placed so nearby findings don't stamp
+    // their number badges directly on top of each other.
+    final placedLabelRects = <Rect>[];
 
     for (var i = 0; i < findings.length; i++) {
       final finding = findings[i];
@@ -552,12 +555,24 @@ class _BoxPainter extends CustomPainter {
         final labelTop =
             (rect.top - 18) < imageRect.top ? rect.top : rect.top - 18;
 
-        final labelBgRect = Rect.fromLTWH(
+        var labelBgRect = Rect.fromLTWH(
           rect.left,
           labelTop,
           labelPainter.width + 10,
           18,
         );
+
+        // If this badge would overlap one already placed (two nearby boxes
+        // whose top-left corners land close together), nudge it down until
+        // it clears, so the numbers stay readable instead of stacking.
+        var guard = 0;
+        while (placedLabelRects.any((r) => r.overlaps(labelBgRect)) &&
+            guard < 8) {
+          labelBgRect = labelBgRect.shift(const Offset(0, 20));
+          guard++;
+        }
+        placedLabelRects.add(labelBgRect);
+
         canvas.drawRRect(
           RRect.fromRectAndCorners(labelBgRect,
               topLeft: const Radius.circular(4),

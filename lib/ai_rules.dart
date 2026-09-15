@@ -14,6 +14,7 @@ import 'ai_scan.dart'
         cropToRegion,
         clusterFindings,
         regionForCluster,
+        prioritizeClusters,
         mapBoxFromCropToFull,
         parseSeverity,
         scaleCoord,
@@ -67,10 +68,11 @@ class AiRulesService {
 
     if (roughFindings.isEmpty) return [];
 
-    final clusters = clusterFindings(roughFindings);
+    final rawClusters = clusterFindings(roughFindings);
+    final (:toLocalize, :leftover) = prioritizeClusters(rawClusters);
     final located = <Finding>[];
 
-    for (final cluster in clusters) {
+    for (final cluster in toLocalize) {
       final region = regionForCluster(cluster);
       final crop = cropToRegion(imageBytes, region);
 
@@ -90,6 +92,21 @@ class AiRulesService {
           description: f.description,
           severity: f.severity,
           box: mapBoxFromCropToFull(box2d, region),
+          isReported: false,
+        ));
+      }
+    }
+
+    // Findings that didn't make the localization cut still show up in the
+    // list, just without a bounding box, instead of forcing them into an
+    // unrelated cluster's crop and drawing a wrong/oversized box.
+    for (final cluster in leftover) {
+      for (final f in cluster) {
+        located.add(Finding(
+          title: f.title,
+          description: f.description,
+          severity: f.severity,
+          box: null,
           isReported: false,
         ));
       }
