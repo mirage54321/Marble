@@ -109,14 +109,6 @@ const int maxLocalizeClusters = 6;
 const double clusterDistanceThreshold = 0.2;
 const double clusterPadding = 0.1;
 
-// Groups nearby findings so we can send one zoomed-in crop per cluster for
-// precise localization. Findings are only merged when they're genuinely
-// close together — we never force a distant finding into an unrelated
-// cluster just to keep the cluster count down, since that stretches the
-// crop region to cover both and ruins localization precision for everyone
-// in it. Any overflow past maxLocalizeClusters is capped later, by simply
-// skipping localization for the least significant clusters (see
-// prioritizeClusters), not by merging them into the wrong place.
 List<List<RoughFinding>> clusterFindings(
   List<RoughFinding> findings, {
   double threshold = clusterDistanceThreshold,
@@ -151,9 +143,7 @@ List<List<RoughFinding>> clusterFindings(
   return clusters;
 }
 
-// Splits clusters into the ones worth spending a localize API call on (the
-// biggest / most numerous first) and the leftover ones we'll show without a
-// precise box rather than mangling an unrelated cluster's crop region.
+
 ({List<List<RoughFinding>> toLocalize, List<List<RoughFinding>> leftover})
     prioritizeClusters(
   List<List<RoughFinding>> clusters, {
@@ -169,11 +159,6 @@ List<List<RoughFinding>> clusterFindings(
   );
 }
 
-// The detect pass only gives a rough point, not a precise location, so
-// the crop we localize against needs enough slack around that point to
-// tolerate the guess being a bit off. A lone finding gets a generous
-// minimum crop size for that reason; a cluster of several nearby findings
-// can trust its own spread more and doesn't need as much extra padding.
 const double _minRegionFraction = 0.45;
 
 CropRegion regionForCluster(
@@ -200,11 +185,7 @@ CropRegion regionForCluster(
   return CropRegion(x: x, y: y, width: width, height: height);
 }
 
-// A localized box that comes back implausibly small relative to the full
-// photo is more likely a failed/uncertain guess than a real find — real
-// robot components don't map to a sliver a couple percent wide at this
-// resolution. Treat those as "not confidently located" rather than
-// drawing a stray dot on the photo.
+
 const double _minPlausibleBoxFraction = 0.03;
 
 BoundingBox? discardImplausiblyTinyBox(BoundingBox? box) {
@@ -309,9 +290,7 @@ class AiService {
       }
     }
 
-    // Findings that didn't make the localization cut still show up in the
-    // list, just without a bounding box, instead of forcing them into an
-    // unrelated cluster's crop and drawing a wrong/oversized box.
+
     for (final cluster in leftover) {
       for (final f in cluster) {
         located.add(Finding(
@@ -346,9 +325,9 @@ class AiService {
       ],
       'generationConfig': {
         'temperature': 0,
-        'maxOutputTokens': 4096,
+        'maxOutputTokens': 8192,
         'responseMimeType': 'application/json',
-        'thinkingConfig': {'thinkingBudget': 0},
+        'thinkingConfig': {'thinkingBudget': 2048},
       },
     };
 
@@ -419,9 +398,9 @@ class AiService {
       ],
       'generationConfig': {
         'temperature': 0,
-        'maxOutputTokens': 1500,
+        'maxOutputTokens': 2048,
         'responseMimeType': 'application/json',
-        'thinkingConfig': {'thinkingBudget': 0},
+        'thinkingConfig': {'thinkingBudget': 512},
       },
     };
 

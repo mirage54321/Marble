@@ -98,9 +98,7 @@ class AiRulesService {
       }
     }
 
-    // Findings that didn't make the localization cut still show up in the
-    // list, just without a bounding box, instead of forcing them into an
-    // unrelated cluster's crop and drawing a wrong/oversized box.
+    
     for (final cluster in leftover) {
       for (final f in cluster) {
         located.add(Finding(
@@ -145,9 +143,9 @@ class AiRulesService {
       ],
       'generationConfig': {
         'temperature': 0,
-        'maxOutputTokens': 4096,
+        'maxOutputTokens': 8192,
         'responseMimeType': 'application/json',
-        'thinkingConfig': {'thinkingBudget': 0},
+        'thinkingConfig': {'thinkingBudget': 2048},
       },
     };
 
@@ -218,9 +216,9 @@ class AiRulesService {
       ],
       'generationConfig': {
         'temperature': 0,
-        'maxOutputTokens': 1500,
+        'maxOutputTokens': 2048,
         'responseMimeType': 'application/json',
-        'thinkingConfig': {'thinkingBudget': 0},
+        'thinkingConfig': {'thinkingBudget': 512},
       },
     };
 
