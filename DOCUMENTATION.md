@@ -505,3 +505,7 @@ Most of the time, (like more than 50%) has been me working on the AI scanner. I'
 
 ![alt text](photos/image44.png)
 ![alt text](photos/image43.png)
+
+## Devlog #27 ->
+This took awhile. And I mean awhile. I had to continuously change code to make the boxes not go off the robot (like put them in the right spots), but then it would take too much usage as a prompt to gemini. Then I would fix the prompt to gemini, and the boxes would be literally no where near the robot. Agh!
+Alas, I have gotten some progress though!
