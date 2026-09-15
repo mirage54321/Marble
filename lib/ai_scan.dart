@@ -283,8 +283,9 @@ class AiService {
       ],
       'generationConfig': {
         'temperature': 0,
-        'maxOutputTokens': 2000,
+        'maxOutputTokens': 4096,
         'responseMimeType': 'application/json',
+        'thinkingConfig': {'thinkingBudget': 0},
       },
     };
 
@@ -355,8 +356,9 @@ class AiService {
       ],
       'generationConfig': {
         'temperature': 0,
-        'maxOutputTokens': 800,
+        'maxOutputTokens': 1500,
         'responseMimeType': 'application/json',
+        'thinkingConfig': {'thinkingBudget': 0},
       },
     };
 
