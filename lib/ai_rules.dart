@@ -10,6 +10,7 @@ import 'connectivity_check.dart';
 import 'ai_scan.dart'
     show
         sanitizeLocalizedBox,
+        boxContainmentFraction,
         parseSeverity,
         mergeOverlappingFindings,
         RetryCallback;
@@ -121,6 +122,20 @@ class AiRulesService {
 
     try {
       final parsed = jsonDecode(rawText) as Map<String, dynamic>;
+
+      BoundingBox? robotBox;
+      final robotBox2d = parsed['robot_box_2d'] as List<dynamic>?;
+      if (robotBox2d != null && robotBox2d.length == 4) {
+        try {
+          final candidate = BoundingBox.fromBox2D(robotBox2d);
+          if (candidate.width >= 0.05 && candidate.height >= 0.05) {
+            robotBox = candidate;
+          }
+        } catch (_) {
+          robotBox = null;
+        }
+      }
+
       final findingsJson = parsed['findings'] as List<dynamic>? ?? [];
       return findingsJson.map((f) {
         final map = f as Map<String, dynamic>;
@@ -132,6 +147,10 @@ class AiRulesService {
           } catch (_) {
             box = null;
           }
+        }
+        if (box != null && robotBox != null &&
+            boxContainmentFraction(box, robotBox) < 0.5) {
+          box = null;
         }
         return Finding(
           title: map['title'] as String? ?? 'Issue found',
@@ -167,25 +186,32 @@ class AiRulesService {
       'motion, or parts that are partially hidden. If a rule cannot be '
       'judged from what is visible in this single photo, do not comment '
       'on it.\n\n'
+      'First, give a bounding box for the robot itself: the tightest box '
+      'that contains the whole visible robot, in the same "box_2d" format '
+      'described below.\n\n'
       'Cite the specific rule number when the manual supports it. For each '
       'thing you flag, give a TIGHT bounding box around exactly that item '
       'only (not the whole robot, not a wide region around it) using '
       'Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], each '
       '0-1000, relative to the full photo. Before answering, double check '
-      'that the box you give actually contains the item you described and '
-      'is not centered on empty background or a different part of the '
-      'robot. Give each finding a short, specific title.\n\n'
+      'that the box you give actually contains the item you described, '
+      'falls inside the robot\'s own bounding box, and is not centered on '
+      'empty background or a different part of the robot. If you cannot '
+      'pin down a confident, accurate box for something, leave its '
+      '"box_2d" out entirely rather than guessing one. Give each finding '
+      'a short, specific title.\n\n'
       'Return an empty findings list ONLY if the image is clear enough to '
       'check the items above and nothing looks worth a closer look. If '
       'the image is too dark, blurry, obstructed, or too distant to check '
       'bumpers or frame perimeter, return one item titled "Photo quality '
       'prevents rule check" with box_2d [400,400,600,600] rather than an '
       'empty list. Respond only with JSON in this exact format:\n\n'
-      '{"findings":[{"title":"short specific issue name","description":'
-      '"one or two sentence explanation of what to double check, cite '
-      'rule number if applicable","severity":"critical|warning|ok",'
-      '"box_2d":[0,0,0,0]}]}\n\n'
-      'If nothing looks worth checking, return {"findings":[]}.';
+      '{"robot_box_2d":[0,0,0,0],"findings":[{"title":"short specific '
+      'issue name","description":"one or two sentence explanation of '
+      'what to double check, cite rule number if applicable","severity":'
+      '"critical|warning|ok","box_2d":[0,0,0,0]}]}\n\n'
+      'If nothing looks worth checking, return {"robot_box_2d":[0,0,0,0],'
+      '"findings":[]}.';
 
   static bool _looksLikeQuotaError(String msg) {
     final lower = msg.toLowerCase();

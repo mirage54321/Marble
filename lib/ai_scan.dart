@@ -44,6 +44,26 @@ BoundingBox? sanitizeLocalizedBox(BoundingBox? box) {
   return box;
 }
 
+double boxContainmentFraction(BoundingBox inner, BoundingBox outer) {
+  final interLeft = inner.x > outer.x ? inner.x : outer.x;
+  final interTop = inner.y > outer.y ? inner.y : outer.y;
+  final interRight = (inner.x + inner.width) < (outer.x + outer.width)
+      ? (inner.x + inner.width)
+      : (outer.x + outer.width);
+  final interBottom = (inner.y + inner.height) < (outer.y + outer.height)
+      ? (inner.y + inner.height)
+      : (outer.y + outer.height);
+
+  final interWidth = interRight - interLeft;
+  final interHeight = interBottom - interTop;
+  if (interWidth <= 0 || interHeight <= 0) return 0.0;
+
+  final innerArea = inner.width * inner.height;
+  if (innerArea <= 0) return 0.0;
+
+  return (interWidth * interHeight) / innerArea;
+}
+
 bool _isRetryableAiError(Object error) {
   final msg = error.toString();
   return msg.contains('experiencing high demand') ||
@@ -159,6 +179,20 @@ class AiService {
 
     try {
       final parsed = jsonDecode(rawText) as Map<String, dynamic>;
+
+      BoundingBox? robotBox;
+      final robotBox2d = parsed['robot_box_2d'] as List<dynamic>?;
+      if (robotBox2d != null && robotBox2d.length == 4) {
+        try {
+          final candidate = BoundingBox.fromBox2D(robotBox2d);
+          if (candidate.width >= 0.05 && candidate.height >= 0.05) {
+            robotBox = candidate;
+          }
+        } catch (_) {
+          robotBox = null;
+        }
+      }
+
       final findingsJson = parsed['findings'] as List<dynamic>? ?? [];
       return findingsJson.map((f) {
         final map = f as Map<String, dynamic>;
@@ -170,6 +204,10 @@ class AiService {
           } catch (_) {
             box = null;
           }
+        }
+        if (box != null && robotBox != null &&
+            boxContainmentFraction(box, robotBox) < 0.5) {
+          box = null;
         }
         return Finding(
           title: map['title'] as String? ?? 'Issue found',
@@ -209,23 +247,31 @@ class AiService {
       'describe specifically. If you are not confident something is an '
       'issue, phrase it as something to double check rather than a '
       'confirmed problem.\n\n'
+      'First, give a bounding box for the robot itself: the tightest box '
+      'that contains the whole visible robot, in the same "box_2d" format '
+      'described below.\n\n'
       'For each thing you flag, give a TIGHT bounding box around exactly '
       'that item only (not the whole robot, not a wide region around it) '
       'using Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], '
       'each 0-1000, relative to the full photo. Before answering, double '
       'check that the box you give actually contains the item you '
-      'described and is not centered on empty background or a different '
-      'part of the robot. Give each finding a short, specific title.\n\n'
+      'described, falls inside the robot\'s own bounding box, and is not '
+      'centered on empty background or a different part of the robot. If '
+      'you cannot pin down a confident, accurate box for something, leave '
+      'its "box_2d" out entirely rather than guessing one. Give each '
+      'finding a short, specific title.\n\n'
       'Return an empty findings list ONLY when the photo is clear enough '
       'to inspect and you see nothing worth a closer look. If the image is '
       'too dark, blurry, obstructed, or too distant for a meaningful '
       'check, return one item titled "Photo quality prevents inspection" '
       'with box_2d [400,400,600,600] instead of returning an empty list. '
       'Respond only with JSON in this exact format:\n\n'
-      '{"findings":[{"title":"short specific issue name","description":'
-      '"one or two sentence explanation of what to look at and why",'
-      '"severity":"critical|warning|ok","box_2d":[0,0,0,0]}]}\n\n'
-      'If nothing stands out, return {"findings":[]}.';
+      '{"robot_box_2d":[0,0,0,0],"findings":[{"title":"short specific '
+      'issue name","description":"one or two sentence explanation of '
+      'what to look at and why","severity":"critical|warning|ok",'
+      '"box_2d":[0,0,0,0]}]}\n\n'
+      'If nothing stands out, return {"robot_box_2d":[0,0,0,0],'
+      '"findings":[]}.';
 
   static bool _looksLikeQuotaError(String msg) {
     final lower = msg.toLowerCase();
