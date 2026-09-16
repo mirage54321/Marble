@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 
 import 'constants.dart';
 import 'retry_helper.dart';
@@ -380,4 +381,169 @@ List<Finding> _dedupeFindings(List<Finding> findings) {
     if (seenTitles.add(key)) byTitle.add(f);
   }
   return mergeOverlappingFindings(byTitle);
+}
+
+const String _refineBase = 'https://ridgeboticsapp.onrender.com';
+
+String _cropToBase64Jpeg(
+  Uint8List originalBytes,
+  double regionX,
+  double regionY,
+  double regionWidth,
+  double regionHeight,
+) {
+  final decoded = img.decodeImage(originalBytes);
+  if (decoded == null) return base64Encode(originalBytes);
+
+  final cropX = (regionX * decoded.width).round().clamp(0, decoded.width - 1);
+  final cropY =
+      (regionY * decoded.height).round().clamp(0, decoded.height - 1);
+  final cropWidth =
+      (regionWidth * decoded.width).round().clamp(1, decoded.width - cropX);
+  final cropHeight =
+      (regionHeight * decoded.height).round().clamp(1, decoded.height - cropY);
+
+  final cropped = img.copyCrop(
+    decoded,
+    x: cropX,
+    y: cropY,
+    width: cropWidth,
+    height: cropHeight,
+  );
+
+  return base64Encode(img.encodeJpg(cropped, quality: 90));
+}
+
+Future<BoundingBox?> refineFindingBox(
+  Uint8List imageBytes,
+  Finding finding, {
+  int maxAttempts = 2,
+}) async {
+  final roughBox = finding.box;
+  if (roughBox == null) return null;
+  if (!ConnectivityCheck.isOnline) return null;
+
+  const padding = 0.15;
+  final regionLeft = (roughBox.x - padding).clamp(0.0, 1.0);
+  final regionTop = (roughBox.y - padding).clamp(0.0, 1.0);
+  final regionRight =
+      (roughBox.x + roughBox.width + padding).clamp(0.0, 1.0);
+  final regionBottom =
+      (roughBox.y + roughBox.height + padding).clamp(0.0, 1.0);
+  final regionX = regionLeft;
+  final regionY = regionTop;
+  final regionWidth = (regionRight - regionLeft).clamp(0.1, 1.0);
+  final regionHeight = (regionBottom - regionTop).clamp(0.1, 1.0);
+
+  final base64Crop = _cropToBase64Jpeg(
+    imageBytes,
+    regionX,
+    regionY,
+    regionWidth,
+    regionHeight,
+  );
+
+  try {
+    return await withBackoffRetry<BoundingBox?>(
+      () => _refineOnce(
+        base64Crop,
+        finding.title,
+        finding.description,
+        regionX,
+        regionY,
+        regionWidth,
+        regionHeight,
+      ),
+      maxAttempts: maxAttempts,
+      initialDelay: const Duration(seconds: 2),
+      isRetryable: _isRetryableAiError,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<BoundingBox?> _refineOnce(
+  String base64Crop,
+  String title,
+  String description,
+  double regionX,
+  double regionY,
+  double regionWidth,
+  double regionHeight,
+) async {
+  final body = {
+    'contents': [
+      {
+        'parts': [
+          {
+            'text': 'You are looking at a zoomed-in crop from a larger '
+                'robot photo. Somewhere in this crop is the following '
+                'specific item:\n\nTitle: $title\nDescription: '
+                '$description\n\n'
+                'Give the tightest possible bounding box around exactly '
+                'that item, tracing its real visible edges precisely, '
+                'not a loose approximation. Use Gemini\'s standard '
+                '"box_2d" format: [ymin, xmin, ymax, xmax], each 0-1000, '
+                'relative to THIS CROP. If you genuinely cannot find this '
+                'exact item anywhere in this crop, respond with '
+                '{"box_2d":null}. Respond only with JSON in this exact '
+                'format: {"box_2d":[0,0,0,0]}',
+          },
+          {
+            'inline_data': {
+              'mime_type': 'image/jpeg',
+              'data': base64Crop,
+            }
+          },
+        ]
+      }
+    ],
+    'generationConfig': {
+      'temperature': 0,
+      'maxOutputTokens': 1024,
+      'responseMimeType': 'application/json',
+      'thinkingConfig': {'thinkingBudget': 1024},
+    },
+  };
+
+  final response = await http
+      .post(
+        Uri.parse('$_refineBase/analyzeImage'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      )
+      .timeout(const Duration(seconds: 30));
+
+  final data = jsonDecode(response.body) as Map<String, dynamic>;
+
+  if (response.statusCode != 200) {
+    final errMsg = data['error']?.toString() ?? 'Unknown error';
+    if (AiService._looksLikeQuotaError(errMsg)) {
+      throw Exception('experiencing high demand');
+    }
+    throw Exception(errMsg);
+  }
+
+  final rawText = AiService._extractText(data);
+  if (rawText == null || rawText.isEmpty) {
+    throw Exception('experiencing high demand');
+  }
+
+  try {
+    final parsed = jsonDecode(rawText) as Map<String, dynamic>;
+    final box2d = parsed['box_2d'] as List<dynamic>?;
+    if (box2d == null || box2d.length != 4) return null;
+
+    final cropBox = BoundingBox.fromBox2D(box2d);
+    final fullBox = BoundingBox(
+      x: regionX + cropBox.x * regionWidth,
+      y: regionY + cropBox.y * regionHeight,
+      width: cropBox.width * regionWidth,
+      height: cropBox.height * regionHeight,
+    );
+    return sanitizeLocalizedBox(fullBox);
+  } catch (e) {
+    throw Exception("Could not read the AI's response, please try again.");
+  }
 }

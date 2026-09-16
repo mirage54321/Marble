@@ -25,6 +25,7 @@ class ResultsScreen extends StatefulWidget {
 
 class _ResultsScreenState extends State<ResultsScreen> {
   int? _highlightedIndex;
+  int? _refiningIndex;
   late final String _scanId;
 
   late final Future<ui.Image> _decodedImage;
@@ -240,6 +241,35 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
+  Future<void> _showOnPhoto(int index, Finding finding) async {
+    final isHighlighted = _highlightedIndex == index;
+    if (isHighlighted) {
+      setState(() => _highlightedIndex = null);
+      return;
+    }
+
+    if (finding.isBoxRefined || finding.box == null) {
+      setState(() => _highlightedIndex = index);
+      return;
+    }
+
+    setState(() => _refiningIndex = index);
+    try {
+      final refined = await refineFindingBox(widget.imageBytes, finding);
+      if (refined != null) finding.box = refined;
+    } catch (_) {
+      // Keep the original box if refinement fails; still show what we have.
+    } finally {
+      finding.isBoxRefined = true;
+      if (mounted) {
+        setState(() {
+          _refiningIndex = null;
+          _highlightedIndex = index;
+        });
+      }
+    }
+  }
+
   Widget _buildFinding({
     required int index,
     required String number,
@@ -252,13 +282,12 @@ class _ResultsScreenState extends State<ResultsScreen> {
             ? 'Warning'
             : 'All clear';
     final isHighlighted = _highlightedIndex == index;
+    final isRefining = _refiningIndex == index;
 
     return TapCursor(
-      onTap: finding.box == null
+      onTap: finding.box == null || isRefining
           ? null
-          : () => setState(() {
-                _highlightedIndex = isHighlighted ? null : index;
-              }),
+          : () => _showOnPhoto(index, finding),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
         padding: const EdgeInsets.all(14),
@@ -335,11 +364,25 @@ class _ResultsScreenState extends State<ResultsScreen> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.my_location,
-                                      size: 11, color: Colors.grey[600]),
+                                  if (isRefining)
+                                    SizedBox(
+                                      width: 11,
+                                      height: 11,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 1.5,
+                                        color: Colors.grey[600],
+                                      ),
+                                    )
+                                  else
+                                    Icon(Icons.my_location,
+                                        size: 11, color: Colors.grey[600]),
                                   const SizedBox(width: 3),
                                   Text(
-                                    isHighlighted ? 'Showing on photo' : 'Show on photo',
+                                    isRefining
+                                        ? 'Pinpointing...'
+                                        : isHighlighted
+                                            ? 'Showing on photo'
+                                            : 'Show on photo',
                                     style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w500,
@@ -508,9 +551,6 @@ class _BoxPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final imageRect = _containedImageRect(size);
-    // Tracks label badges already placed so nearby findings don't stamp
-    // their number badges directly on top of each other.
-    final placedLabelRects = <Rect>[];
 
     for (var i = 0; i < findings.length; i++) {
       final finding = findings[i];
@@ -555,24 +595,12 @@ class _BoxPainter extends CustomPainter {
         final labelTop =
             (rect.top - 18) < imageRect.top ? rect.top : rect.top - 18;
 
-        var labelBgRect = Rect.fromLTWH(
+        final labelBgRect = Rect.fromLTWH(
           rect.left,
           labelTop,
           labelPainter.width + 10,
           18,
         );
-
-        // If this badge would overlap one already placed (two nearby boxes
-        // whose top-left corners land close together), nudge it down until
-        // it clears, so the numbers stay readable instead of stacking.
-        var guard = 0;
-        while (placedLabelRects.any((r) => r.overlaps(labelBgRect)) &&
-            guard < 8) {
-          labelBgRect = labelBgRect.shift(const Offset(0, 20));
-          guard++;
-        }
-        placedLabelRects.add(labelBgRect);
-
         canvas.drawRRect(
           RRect.fromRectAndCorners(labelBgRect,
               topLeft: const Radius.circular(4),

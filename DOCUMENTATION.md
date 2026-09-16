@@ -536,3 +536,4 @@ Still not pixel-perfect but way better. I am planning to make it better. You can
 ## Devlog #29 ->
 Not a code update, but I just wanted to show the data I have collected!
 I have 250+ views, 100+ new users, and 100+ scans logged! I am very happy that I am getting people to view my app and even try it out!
+

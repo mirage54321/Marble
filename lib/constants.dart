@@ -62,8 +62,9 @@ class Finding {
   final String title;
   final String description;
   final ScanStatus severity;
-  final BoundingBox? box;
+  BoundingBox? box;
   bool isReported;
+  bool isBoxRefined;
 
   Finding({
     required this.title,
@@ -71,6 +72,7 @@ class Finding {
     required this.severity,
     this.box,
     this.isReported = false,
+    this.isBoxRefined = false,
   });
 
   factory Finding.fromJson(Map<String, dynamic> json) {
