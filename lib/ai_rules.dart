@@ -93,7 +93,7 @@ class AiRulesService {
         'temperature': 0,
         'maxOutputTokens': 8192,
         'responseMimeType': 'application/json',
-        'thinkingConfig': {'thinkingBudget': 3072},
+        'thinkingConfig': {'thinkingBudget': 4096},
       },
     };
 
@@ -192,6 +192,19 @@ class AiRulesService {
       'motion, or parts that are partially hidden. If a rule cannot be '
       'judged from what is visible in this single photo, do not comment '
       'on it.\n\n'
+      'A single photo usually only shows some sides of the robot (for '
+      'example, a corner view might show just two sides out of four). '
+      'Only evaluate what this specific photo actually shows. Never '
+      'assume the unseen sides have the same problem as a visible side, '
+      'and never treat "not visible in this photo" as evidence of a '
+      'violation. If a rule normally needs every side checked (like '
+      'bumper numbering on all sides) but this photo only shows some of '
+      'them, judge only the visible sides on their own merits: if what '
+      'you can see looks correct, use "ok" and mention in the '
+      'description that the other side(s) were not visible in this photo '
+      'and should be checked separately. Do not flag a side as missing, '
+      'wrong, or worth checking just because the camera didn\'t capture '
+      'it.\n\n'
       'Be careful with severity. Many of these rules involve exact '
       'measurements (bumper height in inches, total robot height, exact '
       'frame perimeter) that cannot be confirmed from a photo alone, only '
@@ -214,9 +227,13 @@ class AiRulesService {
       'thing you flag, give a TIGHT bounding box around exactly that item '
       'only (not the whole robot, not a wide region around it) using '
       'Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], each '
-      '0-1000, relative to the full photo. Before answering, double check '
-      'that the box you give actually contains the item you described, '
-      'falls inside the robot\'s own bounding box, and is not centered on '
+      '0-1000, relative to the full photo. Zoom in mentally on the item '
+      'before setting coordinates: trace its actual visible edges '
+      'closely rather than a loose approximate box, and do not pad the '
+      'box with surrounding material or empty space on any side. Before '
+      'answering, double check that the box you give actually contains '
+      'the item you described, tightly hugs its real edges, falls inside '
+      'the robot\'s own bounding box, and is not centered on '
       'empty background or a different part of the robot. If you cannot '
       'pin down a confident, accurate box for something, leave its '
       '"box_2d" out entirely rather than guessing one. Give each finding '

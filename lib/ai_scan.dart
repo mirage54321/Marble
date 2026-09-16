@@ -150,7 +150,7 @@ class AiService {
         'temperature': 0,
         'maxOutputTokens': 8192,
         'responseMimeType': 'application/json',
-        'thinkingConfig': {'thinkingBudget': 3072},
+        'thinkingConfig': {'thinkingBudget': 4096},
       },
     };
 
@@ -259,10 +259,14 @@ class AiService {
       'For each thing you flag, give a TIGHT bounding box around exactly '
       'that item only (not the whole robot, not a wide region around it) '
       'using Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], '
-      'each 0-1000, relative to the full photo. Before answering, double '
-      'check that the box you give actually contains the item you '
-      'described, falls inside the robot\'s own bounding box, and is not '
-      'centered on empty background or a different part of the robot. If '
+      'each 0-1000, relative to the full photo. Zoom in mentally on the '
+      'item before setting coordinates: trace its actual visible edges '
+      'closely rather than a loose approximate box, and do not pad the '
+      'box with surrounding material or empty space on any side. Before '
+      'answering, double check that the box you give actually contains '
+      'the item you described, tightly hugs its real edges, falls inside '
+      'the robot\'s own bounding box, and is not centered on empty '
+      'background or a different part of the robot. If '
       'you cannot pin down a confident, accurate box for something, leave '
       'its "box_2d" out entirely rather than guessing one. Give each '
       'finding a short, specific title.\n\n'
