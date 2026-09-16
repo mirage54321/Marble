@@ -9,18 +9,9 @@ import 'retry_helper.dart';
 import 'connectivity_check.dart';
 import 'ai_scan.dart'
     show
-        CropRegion,
-        CroppedImage,
-        cropToRegion,
-        clusterFindings,
-        regionForCluster,
-        prioritizeClusters,
-        mapBoxFromCropToFull,
         sanitizeLocalizedBox,
         parseSeverity,
-        scaleCoord,
         mergeOverlappingFindings,
-        RoughFinding,
         RetryCallback;
 
 bool _isRetryableAiError(Object error) {
@@ -59,7 +50,7 @@ class AiRulesService {
       manualData.lengthInBytes,
     ));
 
-    final roughFindings = await withBackoffRetry<List<RoughFinding>>(
+    final findings = await withBackoffRetry<List<Finding>>(
       () => _detectOnce(imageBytes, base64Manual, year),
       maxAttempts: maxAttempts,
       initialDelay: const Duration(seconds: 3),
@@ -67,53 +58,10 @@ class AiRulesService {
       onRetry: onRetry,
     );
 
-    if (roughFindings.isEmpty) return [];
-
-    final rawClusters = clusterFindings(roughFindings);
-    final (:toLocalize, :leftover) = prioritizeClusters(rawClusters);
-    final located = <Finding>[];
-
-    for (final cluster in toLocalize) {
-      final region = regionForCluster(cluster);
-      final crop = cropToRegion(imageBytes, region);
-
-      final boxesByTitle = await withBackoffRetry<Map<String, List<dynamic>?>>(
-        () => _localizeOnce(crop, cluster),
-        maxAttempts: maxAttempts,
-        initialDelay: const Duration(seconds: 3),
-        isRetryable: _isRetryableAiError,
-        onRetry: onRetry,
-      );
-
-      for (final f in cluster) {
-        final key = f.title.trim().toLowerCase();
-        final box2d = boxesByTitle[key];
-        located.add(Finding(
-          title: f.title,
-          description: f.description,
-          severity: f.severity,
-          box: sanitizeLocalizedBox(mapBoxFromCropToFull(box2d, region)),
-          isReported: false,
-        ));
-      }
-    }
-
-    for (final cluster in leftover) {
-      for (final f in cluster) {
-        located.add(Finding(
-          title: f.title,
-          description: f.description,
-          severity: f.severity,
-          box: null,
-          isReported: false,
-        ));
-      }
-    }
-
-    return _dedupeFindings(located);
+    return _dedupeFindings(findings);
   }
 
-  static Future<List<RoughFinding>> _detectOnce(
+  static Future<List<Finding>> _detectOnce(
     Uint8List imageBytes,
     String base64Manual,
     String year,
@@ -144,7 +92,7 @@ class AiRulesService {
         'temperature': 0,
         'maxOutputTokens': 8192,
         'responseMimeType': 'application/json',
-        'thinkingConfig': {'thinkingBudget': 2048},
+        'thinkingConfig': {'thinkingBudget': 3072},
       },
     };
 
@@ -176,85 +124,23 @@ class AiRulesService {
       final findingsJson = parsed['findings'] as List<dynamic>? ?? [];
       return findingsJson.map((f) {
         final map = f as Map<String, dynamic>;
-        final point = map['point'] as List<dynamic>?;
-        final centerY = point != null && point.length == 2 ? scaleCoord(point[0]) : 0.5;
-        final centerX = point != null && point.length == 2 ? scaleCoord(point[1]) : 0.5;
-        return RoughFinding(
+        final box2d = map['box_2d'] as List<dynamic>?;
+        BoundingBox? box;
+        if (box2d != null && box2d.length == 4) {
+          try {
+            box = sanitizeLocalizedBox(BoundingBox.fromBox2D(box2d));
+          } catch (_) {
+            box = null;
+          }
+        }
+        return Finding(
           title: map['title'] as String? ?? 'Issue found',
           description: map['description'] as String? ?? '',
           severity: parseSeverity(map['severity']),
-          centerX: centerX,
-          centerY: centerY,
+          box: box,
+          isReported: false,
         );
       }).toList();
-    } catch (e) {
-      throw Exception("Could not read the AI's response, please try again.");
-    }
-  }
-
-  static Future<Map<String, List<dynamic>?>> _localizeOnce(
-    CroppedImage crop,
-    List<RoughFinding> cluster,
-  ) async {
-    final titleList =
-        cluster.map((f) => '- "${f.title}": ${f.description}').join('\n');
-
-    final body = {
-      'contents': [
-        {
-          'parts': [
-            {'text': _localizePromptText(titleList)},
-            {
-              'inline_data': {
-                'mime_type': 'image/jpeg',
-                'data': crop.base64Jpeg,
-              }
-            },
-          ]
-        }
-      ],
-      'generationConfig': {
-        'temperature': 0,
-        'maxOutputTokens': 2048,
-        'responseMimeType': 'application/json',
-        'thinkingConfig': {'thinkingBudget': 512},
-      },
-    };
-
-    final response = await http
-        .post(
-          Uri.parse('$_base/analyzeImage'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 40));
-
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-
-    if (response.statusCode != 200) {
-      final errMsg = data['error']?.toString() ?? 'Unknown error';
-      if (_looksLikeQuotaError(errMsg)) {
-        throw Exception('experiencing high demand');
-      }
-      throw Exception(errMsg);
-    }
-
-    final rawText = _extractText(data);
-    if (rawText == null || rawText.isEmpty) {
-      throw Exception('experiencing high demand');
-    }
-
-    try {
-      final parsed = jsonDecode(rawText) as Map<String, dynamic>;
-      final boxesJson = parsed['boxes'] as List<dynamic>? ?? [];
-      final result = <String, List<dynamic>?>{};
-      for (final b in boxesJson) {
-        final map = b as Map<String, dynamic>;
-        final title = (map['title'] as String? ?? '').trim().toLowerCase();
-        if (title.isEmpty) continue;
-        result[title] = map['box_2d'] as List<dynamic>?;
-      }
-      return result;
     } catch (e) {
       throw Exception("Could not read the AI's response, please try again.");
     }
@@ -269,7 +155,9 @@ class AiRulesService {
       'not say a robot is compliant, and do not say a robot is in '
       'violation, only that something looks worth a closer look. The '
       'photo may have a lot of plain background around the robot, so look '
-      'carefully at where the robot itself actually is.\n\n'
+      'carefully at where the robot itself actually is, and make sure '
+      'every bounding box you give actually sits on the robot, not on the '
+      'background around it.\n\n'
       'Only check things that can actually be judged from a static photo: '
       'bumper presence, bumper color and numbering, bumper height and '
       'coverage as visible, and whether the visible outline of the robot '
@@ -280,39 +168,24 @@ class AiRulesService {
       'judged from what is visible in this single photo, do not comment '
       'on it.\n\n'
       'Cite the specific rule number when the manual supports it. For each '
-      'thing you flag, give its approximate center point ON THE ROBOT '
-      'ITSELF (not the background) as "point":[y,x], each 0-1000, '
-      'relative to the full photo, using Gemini\'s standard point format. '
-      'Give each finding a short, specific title.\n\n'
+      'thing you flag, give a TIGHT bounding box around exactly that item '
+      'only (not the whole robot, not a wide region around it) using '
+      'Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], each '
+      '0-1000, relative to the full photo. Before answering, double check '
+      'that the box you give actually contains the item you described and '
+      'is not centered on empty background or a different part of the '
+      'robot. Give each finding a short, specific title.\n\n'
       'Return an empty findings list ONLY if the image is clear enough to '
       'check the items above and nothing looks worth a closer look. If '
       'the image is too dark, blurry, obstructed, or too distant to check '
       'bumpers or frame perimeter, return one item titled "Photo quality '
-      'prevents rule check" with point [500,500] rather than an empty '
-      'list. Respond only with JSON in this exact format:\n\n'
+      'prevents rule check" with box_2d [400,400,600,600] rather than an '
+      'empty list. Respond only with JSON in this exact format:\n\n'
       '{"findings":[{"title":"short specific issue name","description":'
       '"one or two sentence explanation of what to double check, cite '
       'rule number if applicable","severity":"critical|warning|ok",'
-      '"point":[500,500]}]}\n\n'
+      '"box_2d":[0,0,0,0]}]}\n\n'
       'If nothing looks worth checking, return {"findings":[]}.';
-
-  static String _localizePromptText(String titleList) =>
-      'You are looking at a zoomed-in crop of a larger robot photo. A '
-      'previous pass identified these possible items to double check as '
-      'being somewhere in this crop:\n\n$titleList\n\n'
-      'For each one, look carefully in THIS crop and, if you can actually '
-      'see it, give its exact bounding box within this crop. If you cannot '
-      'find a specific one of these in this crop, leave it out entirely, '
-      'do not guess a box for it. Do not add any new issues that were not '
-      'in the list above.\n\n'
-      'For box_2d, use Gemini\'s standard format: [ymin, xmin, ymax, xmax], '
-      'each 0–1000, relative to THIS CROP. Match each box back to its exact '
-      'title from the list above. Respond only with JSON in this exact '
-      'format:\n\n'
-      '{"boxes":[{"title":"short specific issue name","box_2d":'
-      '[0,0,0,0]}]}\n\n'
-      'If none of the listed items are visible in this crop, return '
-      '{"boxes":[]}.';
 
   static bool _looksLikeQuotaError(String msg) {
     final lower = msg.toLowerCase();
