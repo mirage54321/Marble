@@ -518,5 +518,21 @@ P.S. I plan to remake the whole system because the issue seems to not be with th
 
 
 ## Devlog #28 ->
-Not really a code update, but I just wanted to show the data I have collected!
+Newwww coddeee updateeee! Okay, so I have a whole new functionality that I think works a lot better. 
+Reworked the AI scanner (damage scan + rules checker). Quick hits:
+
+Faster -> went from up to 7 AI calls per scan down to 1
+No more fake "AI is busy" errors -> that was actually the AI running out of room to think, not real demand
+Boxes land on the robot now -> it checks its own findings against where it says the robot actually is, so wrong boxes just don't show instead of floating in nowhere
+Rules checker stopped overreacting -> only flags "Critical" when it's obvious just from looking, not stuff that actually needs a tape measure
+Stopped judging sides it can't see -> only comments on what's actually in the photo now
+
+Still not pixel-perfect but way better. I am planning to make it better. You can see on the photo I uploaded how it is getting the idea of being really close, however, still not perfect (On the bumper but not ON the bumper). 
+
+![alt text](photos/image50.png)
+![alt text](photos/image49.png)
+
+
+## Devlog #29 ->
+Not a code update, but I just wanted to show the data I have collected!
 I have 250+ views, 100+ new users, and 100+ scans logged! I am very happy that I am getting people to view my app and even try it out!
