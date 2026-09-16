@@ -8129,41 +8129,43 @@ s=1
 break
 case 1:return A.r(q,r)}})
 return A.t($async$Lb,r)},
-a2o(a0,a1,a2){var s=0,r=A.u(t.Xl),q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a
-var $async$a2o=A.v(function(a4,a5){if(a4===1)return A.q(a5,r)
-for(;;)switch(s){case 0:e=B.hL.gwx().em(a0)
-d=t.N
-c=t.GU
-b=t.K
-a=A.a3(["contents",A.b([A.a3(["parts",A.b([A.a3(["text","You are helping a FRC (FIRST Robotics Competition) team do a quick pre-inspection check against the attached "+a2+' FRC game manual. Use ONLY that manual as the source of truth because rules change each season. Your job is to point out things worth double checking against the rulebook, not to give a final ruling on legality. Do not say a robot is compliant, and do not say a robot is in violation, only that something looks worth a closer look. The photo may have a lot of plain background around the robot, so look carefully at where the robot itself actually is, and make sure every bounding box you give actually sits on the robot, not on the background around it.\n\nOnly check things that can actually be judged from a static photo: bumper presence, bumper color and numbering, bumper height and coverage as visible, and whether the visible outline of the robot appears to exceed the frame perimeter. Do not attempt to judge wiring correctness, breaker sizing, component legality, or any rule that depends on internal specifications, mechanism range of motion, or parts that are partially hidden. If a rule cannot be judged from what is visible in this single photo, do not comment on it.\n\nFirst, give a bounding box for the robot itself: the tightest box that contains the whole visible robot, in the same "box_2d" format described below.\n\nCite the specific rule number when the manual supports it. For each thing you flag, give a TIGHT bounding box around exactly that item only (not the whole robot, not a wide region around it) using Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], each 0-1000, relative to the full photo. Before answering, double check that the box you give actually contains the item you described, falls inside the robot\'s own bounding box, and is not centered on empty background or a different part of the robot. If you cannot pin down a confident, accurate box for something, leave its "box_2d" out entirely rather than guessing one. Give each finding a short, specific title.\n\nReturn an empty findings list ONLY if the image is clear enough to check the items above and nothing looks worth a closer look. If the image is too dark, blurry, obstructed, or too distant to check bumpers or frame perimeter, return one item titled "Photo quality prevents rule check" with box_2d [400,400,600,600] rather than an empty list. Respond only with JSON in this exact format:\n\n{"robot_box_2d":[0,0,0,0],"findings":[{"title":"short specific issue name","description":"one or two sentence explanation of what to double check, cite rule number if applicable","severity":"critical|warning|ok","box_2d":[0,0,0,0]}]}\n\nIf nothing looks worth checking, return {"robot_box_2d":[0,0,0,0],"findings":[]}.'],d,d),A.a3(["inline_data",A.a3(["mime_type","application/pdf","data",a1],d,d)],d,c),A.a3(["inline_data",A.a3(["mime_type","image/jpeg","data",e],d,d)],d,c)],t.Mq)],d,t.JD)],t.lU),"generationConfig",A.a3(["temperature",0,"maxOutputTokens",8192,"responseMimeType","application/json","thinkingConfig",A.a3(["thinkingBudget",3072],d,t.S)],d,b)],d,b)
-b=A.cf(u.v,0,null)
-d=A.a3(["Content-Type","application/json"],d,d)
+a2o(a2,a3,a4){var s=0,r=A.u(t.Xl),q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1
+var $async$a2o=A.v(function(a6,a7){if(a6===1)return A.q(a7,r)
+for(;;)switch(s){case 0:c=B.hL.gwx().em(a2)
+b=t.N
+a=t.GU
+a0=t.K
+a1=A.a3(["contents",A.b([A.a3(["parts",A.b([A.a3(["text","You are helping a FRC (FIRST Robotics Competition) team do a quick pre-inspection check against the attached "+a4+' FRC game manual. Use ONLY that manual as the source of truth because rules change each season. Your job is to point out things worth double checking against the rulebook, not to give a final ruling on legality. Do not say a robot is compliant, and do not say a robot is in violation, only that something looks worth a closer look. The photo may have a lot of plain background around the robot, so look carefully at where the robot itself actually is, and make sure every bounding box you give actually sits on the robot, not on the background around it.\n\nOnly check things that can actually be judged from a static photo: bumper presence, bumper color and numbering, bumper height and coverage as visible, and whether the visible outline of the robot appears to exceed the frame perimeter. Do not attempt to judge wiring correctness, breaker sizing, component legality, or any rule that depends on internal specifications, mechanism range of motion, or parts that are partially hidden. If a rule cannot be judged from what is visible in this single photo, do not comment on it.\n\nBe careful with severity. Many of these rules involve exact measurements (bumper height in inches, total robot height, exact frame perimeter) that cannot be confirmed from a photo alone, only estimated by eye. Use "critical" ONLY when a violation is obvious and unambiguous just from looking, with no real doubt: bumpers clearly and entirely missing, a bumper\'s numbering clearly absent, or the robot obviously and grossly over a limit by a wide margin. For anything that merely looks like it MIGHT be out of range, or where confirming it would require an actual measurement, use "warning" and phrase the description as something to double check or measure, not as a confirmed violation. Do not assume a measurement-dependent rule is being violated just because it cannot be verified from the photo; the default when uncertain is "warning", not "critical". Use "ok" when what is visible clearly satisfies the rule.\n\nFirst, give a bounding box for the robot itself: the tightest box that contains the whole visible robot, in the same "box_2d" format described below.\n\nCite the specific rule number when the manual supports it. For each thing you flag, give a TIGHT bounding box around exactly that item only (not the whole robot, not a wide region around it) using Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], each 0-1000, relative to the full photo. Before answering, double check that the box you give actually contains the item you described, falls inside the robot\'s own bounding box, and is not centered on empty background or a different part of the robot. If you cannot pin down a confident, accurate box for something, leave its "box_2d" out entirely rather than guessing one. Give each finding a short, specific title.\n\nReturn an empty findings list ONLY if the image is clear enough to check the items above and nothing looks worth a closer look. If the image is too dark, blurry, obstructed, or too distant to check bumpers or frame perimeter, return one item titled "Photo quality prevents rule check" with box_2d [400,400,600,600] rather than an empty list. Respond only with JSON in this exact format:\n\n{"robot_box_2d":[0,0,0,0],"findings":[{"title":"short specific issue name","description":"one or two sentence explanation of what to double check, cite rule number if applicable","severity":"critical|warning|ok","box_2d":[0,0,0,0]}]}\n\nIf nothing looks worth checking, return {"robot_box_2d":[0,0,0,0],"findings":[]}.'],b,b),A.a3(["inline_data",A.a3(["mime_type","application/pdf","data",a3],b,b)],b,a),A.a3(["inline_data",A.a3(["mime_type","image/jpeg","data",c],b,b)],b,a)],t.Mq)],b,t.JD)],t.lU),"generationConfig",A.a3(["temperature",0,"maxOutputTokens",8192,"responseMimeType","application/json","thinkingConfig",A.a3(["thinkingBudget",3072],b,t.S)],b,a0)],b,a0)
+a0=A.cf(u.v,0,null)
+b=A.a3(["Content-Type","application/json"],b,b)
 s=3
-return A.k(A.k4(b,B.K.hc(a,null),d).cW(B.px),$async$a2o)
-case 3:k=a5
-d=t.P
-j=d.a(B.K.dG(A.eT(A.eS(k.e)).cu(k.w),null))
-if(k.b!==200){d=j.h(0,"error")
-i=d==null?null:J.cO(d)
-if(i==null)i="Unknown error"
-h=i.toLowerCase()
-if(B.c.n(h,"quota")||B.c.n(h,"429")||B.c.n(h,"rate limit")||B.c.n(h,"resource_exhausted"))throw A.f(A.cu("experiencing high demand"))
-throw A.f(A.cu(i))}p=A.aV4(j)
+return A.k(A.k4(a0,B.K.hc(a1,null),b).cW(B.px),$async$a2o)
+case 3:i=a7
+b=t.P
+h=b.a(B.K.dG(A.eT(A.eS(i.e)).cu(i.w),null))
+if(i.b!==200){b=h.h(0,"error")
+g=b==null?null:J.cO(b)
+if(g==null)g="Unknown error"
+f=g.toLowerCase()
+if(B.c.n(f,"quota")||B.c.n(f,"429")||B.c.n(f,"rate limit")||B.c.n(f,"resource_exhausted"))throw A.f(A.cu("experiencing high demand"))
+throw A.f(A.cu(g))}p=A.aV4(h)
 if(p==null||p.length===0)throw A.f(A.cu("experiencing high demand"))
-try{c={}
-o=d.a(B.K.dG(p,null))
-c.a=null
-d=t.g
-n=d.a(J.bA(o,"robot_box_2d"))
+try{a={}
+o=b.a(B.K.dG(p,null))
+a.a=null
+b=t.g
+n=b.a(J.bA(o,"robot_box_2d"))
 if(n!=null&&J.bS(n)===4)try{m=A.a38(n)
-if(m.c>=0.05&&m.d>=0.05)c.a=m}catch(a3){c.a=null}f=d.a(J.bA(o,"findings"))
-l=f==null?[]:f
-d=J.d2(l,new A.a2p(c),t.nr)
-d=A.T(d,d.$ti.i("ab.E"))
-q=d
+l=m.c>=0.05&&m.d>=0.05
+k=m.c<=0.97||m.d<=0.97
+if(l&&k)a.a=m}catch(a5){a.a=null}d=b.a(J.bA(o,"findings"))
+j=d==null?[]:d
+b=J.d2(j,new A.a2p(a),t.nr)
+b=A.T(b,b.$ti.i("ab.E"))
+q=b
 s=1
-break}catch(a3){d=A.cu(u.l)
-throw A.f(d)}case 1:return A.r(q,r)}})
+break}catch(a5){b=A.cu(u.l)
+throw A.f(b)}case 1:return A.r(q,r)}})
 return A.t($async$a2o,r)},
 aV4(a){var s,r,q,p
 try{s=t.g.a(a.h(0,"candidates"))
@@ -8233,40 +8235,42 @@ s=1
 break
 case 1:return A.r(q,r)}})
 return A.t($async$a2t,r)},
-a2r(a){var s=0,r=A.u(t.Xl),q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b
-var $async$a2r=A.v(function(a1,a2){if(a1===1)return A.q(a2,r)
-for(;;)switch(s){case 0:e=B.hL.gwx().em(a)
-d=t.N
-c=t.K
-b=A.a3(["contents",A.b([A.a3(["parts",A.b([A.a3(["text",'You are helping a FRC (FIRST Robotics Competition) team do a quick visual check of their robot before a real inspection. Your job is to point out things worth a closer look, not to give a final verdict on safety or compliance. The photo may have a lot of plain background around the robot, so look carefully at where the robot itself actually is, and make sure every bounding box you give actually sits on the robot, not on the background around it.\n\nLook for things like exposed conductors or damaged insulation, loose or unsecured wiring, loose connectors, unprotected battery terminals, loose or missing fasteners, cracked or bent frame members, corrosion, loose or misaligned belts or chains, sharp edges, and parts that look like they could fail in a match. Do not invent defects: ordinary screws, mounting holes, zip ties, and normal wires are not problems by themselves.\n\nNever identify what a button, light, or switch does. Do not label anything as an emergency stop, e-stop, safety light, or any other safety-critical control, even if it looks like one. If you notice a button, light, or switch that looks worth checking, describe only what you see physically (for example, "unlabeled red button near the battery") and let the team confirm its actual function themselves.\n\nOnly flag something if you can actually see it clearly enough to describe specifically. If you are not confident something is an issue, phrase it as something to double check rather than a confirmed problem.\n\nFirst, give a bounding box for the robot itself: the tightest box that contains the whole visible robot, in the same "box_2d" format described below.\n\nFor each thing you flag, give a TIGHT bounding box around exactly that item only (not the whole robot, not a wide region around it) using Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], each 0-1000, relative to the full photo. Before answering, double check that the box you give actually contains the item you described, falls inside the robot\'s own bounding box, and is not centered on empty background or a different part of the robot. If you cannot pin down a confident, accurate box for something, leave its "box_2d" out entirely rather than guessing one. Give each finding a short, specific title.\n\nReturn an empty findings list ONLY when the photo is clear enough to inspect and you see nothing worth a closer look. If the image is too dark, blurry, obstructed, or too distant for a meaningful check, return one item titled "Photo quality prevents inspection" with box_2d [400,400,600,600] instead of returning an empty list. Respond only with JSON in this exact format:\n\n{"robot_box_2d":[0,0,0,0],"findings":[{"title":"short specific issue name","description":"one or two sentence explanation of what to look at and why","severity":"critical|warning|ok","box_2d":[0,0,0,0]}]}\n\nIf nothing stands out, return {"robot_box_2d":[0,0,0,0],"findings":[]}.'],d,d),A.a3(["inline_data",A.a3(["mime_type","image/jpeg","data",e],d,d)],d,t.GU)],t.Mq)],d,t.JD)],t.lU),"generationConfig",A.a3(["temperature",0,"maxOutputTokens",8192,"responseMimeType","application/json","thinkingConfig",A.a3(["thinkingBudget",3072],d,t.S)],d,c)],d,c)
-c=A.cf(u.v,0,null)
-d=A.a3(["Content-Type","application/json"],d,d)
+a2r(a1){var s=0,r=A.u(t.Xl),q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0
+var $async$a2r=A.v(function(a3,a4){if(a3===1)return A.q(a4,r)
+for(;;)switch(s){case 0:c=B.hL.gwx().em(a1)
+b=t.N
+a=t.K
+a0=A.a3(["contents",A.b([A.a3(["parts",A.b([A.a3(["text",'You are helping a FRC (FIRST Robotics Competition) team do a quick visual check of their robot before a real inspection. Your job is to point out things worth a closer look, not to give a final verdict on safety or compliance. The photo may have a lot of plain background around the robot, so look carefully at where the robot itself actually is, and make sure every bounding box you give actually sits on the robot, not on the background around it.\n\nLook for things like exposed conductors or damaged insulation, loose or unsecured wiring, loose connectors, unprotected battery terminals, loose or missing fasteners, cracked or bent frame members, corrosion, loose or misaligned belts or chains, sharp edges, and parts that look like they could fail in a match. Do not invent defects: ordinary screws, mounting holes, zip ties, and normal wires are not problems by themselves.\n\nNever identify what a button, light, or switch does. Do not label anything as an emergency stop, e-stop, safety light, or any other safety-critical control, even if it looks like one. If you notice a button, light, or switch that looks worth checking, describe only what you see physically (for example, "unlabeled red button near the battery") and let the team confirm its actual function themselves.\n\nOnly flag something if you can actually see it clearly enough to describe specifically. If you are not confident something is an issue, phrase it as something to double check rather than a confirmed problem.\n\nFirst, give a bounding box for the robot itself: the tightest box that contains the whole visible robot, in the same "box_2d" format described below.\n\nFor each thing you flag, give a TIGHT bounding box around exactly that item only (not the whole robot, not a wide region around it) using Gemini\'s standard "box_2d" format: [ymin, xmin, ymax, xmax], each 0-1000, relative to the full photo. Before answering, double check that the box you give actually contains the item you described, falls inside the robot\'s own bounding box, and is not centered on empty background or a different part of the robot. If you cannot pin down a confident, accurate box for something, leave its "box_2d" out entirely rather than guessing one. Give each finding a short, specific title.\n\nReturn an empty findings list ONLY when the photo is clear enough to inspect and you see nothing worth a closer look. If the image is too dark, blurry, obstructed, or too distant for a meaningful check, return one item titled "Photo quality prevents inspection" with box_2d [400,400,600,600] instead of returning an empty list. Respond only with JSON in this exact format:\n\n{"robot_box_2d":[0,0,0,0],"findings":[{"title":"short specific issue name","description":"one or two sentence explanation of what to look at and why","severity":"critical|warning|ok","box_2d":[0,0,0,0]}]}\n\nIf nothing stands out, return {"robot_box_2d":[0,0,0,0],"findings":[]}.'],b,b),A.a3(["inline_data",A.a3(["mime_type","image/jpeg","data",c],b,b)],b,t.GU)],t.Mq)],b,t.JD)],t.lU),"generationConfig",A.a3(["temperature",0,"maxOutputTokens",8192,"responseMimeType","application/json","thinkingConfig",A.a3(["thinkingBudget",3072],b,t.S)],b,a)],b,a)
+a=A.cf(u.v,0,null)
+b=A.a3(["Content-Type","application/json"],b,b)
 s=3
-return A.k(A.k4(c,B.K.hc(b,null),d).cW(B.px),$async$a2r)
-case 3:k=a2
-d=t.P
-j=d.a(B.K.dG(A.eT(A.eS(k.e)).cu(k.w),null))
-if(k.b!==200){d=j.h(0,"error")
-i=d==null?null:J.cO(d)
-if(i==null)i="Unknown error"
-h=i.toLowerCase()
-if(B.c.n(h,"quota")||B.c.n(h,"429")||B.c.n(h,"rate limit")||B.c.n(h,"resource_exhausted"))throw A.f(A.cu("experiencing high demand"))
-throw A.f(A.cu(i))}p=A.aV5(j)
+return A.k(A.k4(a,B.K.hc(a0,null),b).cW(B.px),$async$a2r)
+case 3:i=a4
+b=t.P
+h=b.a(B.K.dG(A.eT(A.eS(i.e)).cu(i.w),null))
+if(i.b!==200){b=h.h(0,"error")
+g=b==null?null:J.cO(b)
+if(g==null)g="Unknown error"
+f=g.toLowerCase()
+if(B.c.n(f,"quota")||B.c.n(f,"429")||B.c.n(f,"rate limit")||B.c.n(f,"resource_exhausted"))throw A.f(A.cu("experiencing high demand"))
+throw A.f(A.cu(g))}p=A.aV5(h)
 if(p==null||p.length===0)throw A.f(A.cu("experiencing high demand"))
-try{c={}
-o=d.a(B.K.dG(p,null))
-c.a=null
-d=t.g
-n=d.a(J.bA(o,"robot_box_2d"))
+try{a={}
+o=b.a(B.K.dG(p,null))
+a.a=null
+b=t.g
+n=b.a(J.bA(o,"robot_box_2d"))
 if(n!=null&&J.bS(n)===4)try{m=A.a38(n)
-if(m.c>=0.05&&m.d>=0.05)c.a=m}catch(a0){c.a=null}f=d.a(J.bA(o,"findings"))
-l=f==null?[]:f
-d=J.d2(l,new A.a2s(c),t.nr)
-d=A.T(d,d.$ti.i("ab.E"))
-q=d
+l=m.c>=0.05&&m.d>=0.05
+k=m.c<=0.97||m.d<=0.97
+if(l&&k)a.a=m}catch(a2){a.a=null}d=b.a(J.bA(o,"findings"))
+j=d==null?[]:d
+b=J.d2(j,new A.a2s(a),t.nr)
+b=A.T(b,b.$ti.i("ab.E"))
+q=b
 s=1
-break}catch(a0){d=A.cu(u.l)
-throw A.f(d)}case 1:return A.r(q,r)}})
+break}catch(a2){b=A.cu(u.l)
+throw A.f(b)}case 1:return A.r(q,r)}})
 return A.t($async$a2r,r)},
 aV5(a){var s,r,q,p
 try{s=t.g.a(a.h(0,"candidates"))
@@ -46422,9 +46426,9 @@ $0(){return A.a2o(this.a,this.b,this.c)},
 $S:248}
 A.a2p.prototype={
 $1(a){var s,r,q,p=t.P.a(a),o=t.g.a(J.bA(p,"box_2d")),n=null
-if(o!=null&&J.bS(o)===4)try{n=A.aRD(A.a38(o))}catch(s){n=null}if(n!=null){r=this.a.a
-r=r!=null&&A.aQV(n,r)<0.5}else r=!1
-if(r)n=null
+if(o!=null&&J.bS(o)===4)try{n=A.aRD(A.a38(o))}catch(s){n=null}r=this.a.a
+if(r==null)n=null
+else if(n!=null&&A.aQV(n,r)<0.5)n=null
 r=A.b4(J.bA(p,"title"))
 if(r==null)r="Issue found"
 q=A.b4(J.bA(p,"description"))
@@ -46436,9 +46440,9 @@ $0(){return A.a2r(this.a)},
 $S:248}
 A.a2s.prototype={
 $1(a){var s,r,q,p=t.P.a(a),o=t.g.a(J.bA(p,"box_2d")),n=null
-if(o!=null&&J.bS(o)===4)try{n=A.aRD(A.a38(o))}catch(s){n=null}if(n!=null){r=this.a.a
-r=r!=null&&A.aQV(n,r)<0.5}else r=!1
-if(r)n=null
+if(o!=null&&J.bS(o)===4)try{n=A.aRD(A.a38(o))}catch(s){n=null}r=this.a.a
+if(r==null)n=null
+else if(n!=null&&A.aQV(n,r)<0.5)n=null
 r=A.b4(J.bA(p,"title"))
 if(r==null)r="Issue found"
 q=A.b4(J.bA(p,"description"))

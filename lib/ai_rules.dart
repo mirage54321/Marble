@@ -128,7 +128,11 @@ class AiRulesService {
       if (robotBox2d != null && robotBox2d.length == 4) {
         try {
           final candidate = BoundingBox.fromBox2D(robotBox2d);
-          if (candidate.width >= 0.05 && candidate.height >= 0.05) {
+          final isReasonablySized =
+              candidate.width >= 0.05 && candidate.height >= 0.05;
+          final isNotLazyFullFrameGuess =
+              candidate.width <= 0.97 || candidate.height <= 0.97;
+          if (isReasonablySized && isNotLazyFullFrameGuess) {
             robotBox = candidate;
           }
         } catch (_) {
@@ -148,7 +152,9 @@ class AiRulesService {
             box = null;
           }
         }
-        if (box != null && robotBox != null &&
+        if (robotBox == null) {
+          box = null;
+        } else if (box != null &&
             boxContainmentFraction(box, robotBox) < 0.5) {
           box = null;
         }
@@ -186,6 +192,21 @@ class AiRulesService {
       'motion, or parts that are partially hidden. If a rule cannot be '
       'judged from what is visible in this single photo, do not comment '
       'on it.\n\n'
+      'Be careful with severity. Many of these rules involve exact '
+      'measurements (bumper height in inches, total robot height, exact '
+      'frame perimeter) that cannot be confirmed from a photo alone, only '
+      'estimated by eye. Use "critical" ONLY when a violation is '
+      'obvious and unambiguous just from looking, with no real doubt: '
+      'bumpers clearly and entirely missing, a bumper\'s numbering '
+      'clearly absent, or the robot obviously and grossly over a limit '
+      'by a wide margin. For anything that merely looks like it MIGHT be '
+      'out of range, or where confirming it would require an actual '
+      'measurement, use "warning" and phrase the description as '
+      'something to double check or measure, not as a confirmed '
+      'violation. Do not assume a measurement-dependent rule is being '
+      'violated just because it cannot be verified from the photo; the '
+      'default when uncertain is "warning", not "critical". Use "ok" '
+      'when what is visible clearly satisfies the rule.\n\n'
       'First, give a bounding box for the robot itself: the tightest box '
       'that contains the whole visible robot, in the same "box_2d" format '
       'described below.\n\n'

@@ -185,7 +185,11 @@ class AiService {
       if (robotBox2d != null && robotBox2d.length == 4) {
         try {
           final candidate = BoundingBox.fromBox2D(robotBox2d);
-          if (candidate.width >= 0.05 && candidate.height >= 0.05) {
+          final isReasonablySized =
+              candidate.width >= 0.05 && candidate.height >= 0.05;
+          final isNotLazyFullFrameGuess =
+              candidate.width <= 0.97 || candidate.height <= 0.97;
+          if (isReasonablySized && isNotLazyFullFrameGuess) {
             robotBox = candidate;
           }
         } catch (_) {
@@ -205,7 +209,9 @@ class AiService {
             box = null;
           }
         }
-        if (box != null && robotBox != null &&
+        if (robotBox == null) {
+          box = null;
+        } else if (box != null &&
             boxContainmentFraction(box, robotBox) < 0.5) {
           box = null;
         }
