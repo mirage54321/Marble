@@ -24,7 +24,7 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> pickPhoto() async {
     final picked = await _picker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 85,
+      imageQuality: 100,
     );
     if (picked != null) {
       final bytes = await picked.readAsBytes();

@@ -257,7 +257,15 @@ class _ResultsScreenState extends State<ResultsScreen> {
     try {
       final refined = await refineFindingBox(widget.imageBytes, finding);
       if (refined != null) finding.box = refined;
+
+      final segmented = await segmentFindingMask(widget.imageBytes, finding);
+      if (segmented != null) finding.box = segmented;
+
+      if (finding.box != null) {
+        finding.box = snapBoxToEdges(widget.imageBytes, finding.box!);
+      }
     } catch (_) {
+      // Keep whatever box we already have if refinement/segmentation fails.
     } finally {
       finding.isBoxRefined = true;
       if (mounted) {
@@ -378,7 +386,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                                   const SizedBox(width: 3),
                                   Text(
                                     isRefining
-                                        ? 'Pinpointing...'
+                                        ? 'Tracing edges...'
                                         : isHighlighted
                                             ? 'Showing on photo'
                                             : 'Show on photo',

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -385,7 +386,19 @@ List<Finding> _dedupeFindings(List<Finding> findings) {
 
 const String _refineBase = 'https://ridgeboticsapp.onrender.com';
 
-String _cropToBase64Jpeg(
+class _JpegCrop {
+  final String base64Jpeg;
+  final int width;
+  final int height;
+
+  const _JpegCrop({
+    required this.base64Jpeg,
+    required this.width,
+    required this.height,
+  });
+}
+
+_JpegCrop _cropToJpeg(
   Uint8List originalBytes,
   double regionX,
   double regionY,
@@ -393,7 +406,9 @@ String _cropToBase64Jpeg(
   double regionHeight,
 ) {
   final decoded = img.decodeImage(originalBytes);
-  if (decoded == null) return base64Encode(originalBytes);
+  if (decoded == null) {
+    return _JpegCrop(base64Jpeg: base64Encode(originalBytes), width: 0, height: 0);
+  }
 
   final cropX = (regionX * decoded.width).round().clamp(0, decoded.width - 1);
   final cropY =
@@ -411,7 +426,27 @@ String _cropToBase64Jpeg(
     height: cropHeight,
   );
 
-  return base64Encode(img.encodeJpg(cropped, quality: 90));
+  return _JpegCrop(
+    base64Jpeg: base64Encode(img.encodeJpg(cropped, quality: 90)),
+    width: cropWidth,
+    height: cropHeight,
+  );
+}
+
+String _cropToBase64Jpeg(
+  Uint8List originalBytes,
+  double regionX,
+  double regionY,
+  double regionWidth,
+  double regionHeight,
+) {
+  return _cropToJpeg(
+    originalBytes,
+    regionX,
+    regionY,
+    regionWidth,
+    regionHeight,
+  ).base64Jpeg;
 }
 
 Future<BoundingBox?> refineFindingBox(
@@ -546,4 +581,218 @@ Future<BoundingBox?> _refineOnce(
   } catch (e) {
     throw Exception("Could not read the AI's response, please try again.");
   }
+}
+
+Future<BoundingBox?> segmentFindingMask(
+  Uint8List imageBytes,
+  Finding finding,
+) async {
+  final box = finding.box;
+  if (box == null) return null;
+  if (!ConnectivityCheck.isOnline) return null;
+
+  const padding = 0.08;
+  final regionLeft = (box.x - padding).clamp(0.0, 1.0);
+  final regionTop = (box.y - padding).clamp(0.0, 1.0);
+  final regionRight = (box.x + box.width + padding).clamp(0.0, 1.0);
+  final regionBottom = (box.y + box.height + padding).clamp(0.0, 1.0);
+  final regionX = regionLeft;
+  final regionY = regionTop;
+  final regionWidth = (regionRight - regionLeft).clamp(0.05, 1.0);
+  final regionHeight = (regionBottom - regionTop).clamp(0.05, 1.0);
+
+  final crop =
+      _cropToJpeg(imageBytes, regionX, regionY, regionWidth, regionHeight);
+  if (crop.width <= 0 || crop.height <= 0) return null;
+
+  final boxLeftInCrop = ((box.x - regionX) / regionWidth).clamp(0.0, 1.0);
+  final boxTopInCrop = ((box.y - regionY) / regionHeight).clamp(0.0, 1.0);
+  final boxWidthInCrop = (box.width / regionWidth).clamp(0.0, 1.0);
+  final boxHeightInCrop = (box.height / regionHeight).clamp(0.0, 1.0);
+
+  final pixelBox = [
+    (boxLeftInCrop * crop.width).round(),
+    (boxTopInCrop * crop.height).round(),
+    (boxWidthInCrop * crop.width).round().clamp(1, crop.width),
+    (boxHeightInCrop * crop.height).round().clamp(1, crop.height),
+  ];
+
+  try {
+    final response = await http
+        .post(
+          Uri.parse('$_refineBase/segmentFinding'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'image': crop.base64Jpeg, 'box': pixelBox}),
+        )
+        .timeout(const Duration(seconds: 45));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode != 200) return null;
+
+    final maskUrl = data['maskUrl'] as String?;
+    if (maskUrl == null) return null;
+
+    final maskResponse =
+        await http.get(Uri.parse(maskUrl)).timeout(const Duration(seconds: 30));
+    if (maskResponse.statusCode != 200) return null;
+
+    final maskImage = img.decodeImage(maskResponse.bodyBytes);
+    if (maskImage == null) return null;
+
+    var minX = maskImage.width;
+    var minY = maskImage.height;
+    var maxX = -1;
+    var maxY = -1;
+
+    for (var y = 0; y < maskImage.height; y++) {
+      for (var x = 0; x < maskImage.width; x++) {
+        final pixel = maskImage.getPixel(x, y);
+        final luminance = (pixel.r + pixel.g + pixel.b) / 3;
+        if (luminance > 127) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX < minX || maxY < minY) return null;
+
+    final maskBoxInCrop = BoundingBox(
+      x: minX / maskImage.width,
+      y: minY / maskImage.height,
+      width: (maxX - minX + 1) / maskImage.width,
+      height: (maxY - minY + 1) / maskImage.height,
+    );
+
+    final fullBox = BoundingBox(
+      x: regionX + maskBoxInCrop.x * regionWidth,
+      y: regionY + maskBoxInCrop.y * regionHeight,
+      width: maskBoxInCrop.width * regionWidth,
+      height: maskBoxInCrop.height * regionHeight,
+    );
+
+    return sanitizeLocalizedBox(fullBox);
+  } catch (_) {
+    return null;
+  }
+}
+
+BoundingBox snapBoxToEdges(Uint8List imageBytes, BoundingBox box) {
+  final decoded = img.decodeImage(imageBytes);
+  if (decoded == null) return box;
+
+  const margin = 0.15;
+  final regionX = (box.x - box.width * margin).clamp(0.0, 1.0);
+  final regionY = (box.y - box.height * margin).clamp(0.0, 1.0);
+  final regionRight = (box.x + box.width * (1 + margin)).clamp(0.0, 1.0);
+  final regionBottom = (box.y + box.height * (1 + margin)).clamp(0.0, 1.0);
+  final regionWidth = (regionRight - regionX).clamp(0.01, 1.0);
+  final regionHeight = (regionBottom - regionY).clamp(0.01, 1.0);
+
+  final cropX = (regionX * decoded.width).round().clamp(0, decoded.width - 1);
+  final cropY =
+      (regionY * decoded.height).round().clamp(0, decoded.height - 1);
+  final cropWidth =
+      (regionWidth * decoded.width).round().clamp(1, decoded.width - cropX);
+  final cropHeight =
+      (regionHeight * decoded.height).round().clamp(1, decoded.height - cropY);
+
+  if (cropWidth < 6 || cropHeight < 6) return box;
+
+  final crop = img.copyCrop(
+    decoded,
+    x: cropX,
+    y: cropY,
+    width: cropWidth,
+    height: cropHeight,
+  );
+
+  final gray = List.generate(cropHeight, (_) => List<double>.filled(cropWidth, 0));
+  for (var y = 0; y < cropHeight; y++) {
+    for (var x = 0; x < cropWidth; x++) {
+      final pixel = crop.getPixel(x, y);
+      gray[y][x] = (pixel.r + pixel.g + pixel.b) / 3.0;
+    }
+  }
+
+  final mag = List.generate(cropHeight, (_) => List<double>.filled(cropWidth, 0));
+  for (var y = 1; y < cropHeight - 1; y++) {
+    for (var x = 1; x < cropWidth - 1; x++) {
+      final gx = gray[y - 1][x + 1] +
+          2 * gray[y][x + 1] +
+          gray[y + 1][x + 1] -
+          gray[y - 1][x - 1] -
+          2 * gray[y][x - 1] -
+          gray[y + 1][x - 1];
+      final gy = gray[y + 1][x - 1] +
+          2 * gray[y + 1][x] +
+          gray[y + 1][x + 1] -
+          gray[y - 1][x - 1] -
+          2 * gray[y - 1][x] -
+          gray[y - 1][x + 1];
+      mag[y][x] = math.sqrt(gx * gx + gy * gy);
+    }
+  }
+
+  final origLeft =
+      (((box.x - regionX) / regionWidth) * cropWidth).round().clamp(0, cropWidth - 1);
+  final origRight = ((((box.x + box.width) - regionX) / regionWidth) * cropWidth)
+      .round()
+      .clamp(0, cropWidth - 1);
+  final origTop =
+      (((box.y - regionY) / regionHeight) * cropHeight).round().clamp(0, cropHeight - 1);
+  final origBottom = ((((box.y + box.height) - regionY) / regionHeight) * cropHeight)
+      .round()
+      .clamp(0, cropHeight - 1);
+
+  final searchBandX = (cropWidth * 0.12).round().clamp(2, (cropWidth / 3).floor());
+  final searchBandY = (cropHeight * 0.12).round().clamp(2, (cropHeight / 3).floor());
+
+  double columnStrength(int x) {
+    if (x < 0 || x >= cropWidth) return 0.0;
+    var sum = 0.0;
+    for (var y = origTop; y <= origBottom; y++) sum += mag[y][x];
+    return sum;
+  }
+
+  double rowStrength(int y) {
+    if (y < 0 || y >= cropHeight) return 0.0;
+    var sum = 0.0;
+    for (var x = origLeft; x <= origRight; x++) sum += mag[y][x];
+    return sum;
+  }
+
+  int bestNear(int center, int band, double Function(int) strengthFn) {
+    var bestPos = center;
+    var bestVal = strengthFn(center);
+    for (var d = -band; d <= band; d++) {
+      final pos = center + d;
+      final val = strengthFn(pos);
+      if (val > bestVal) {
+        bestVal = val;
+        bestPos = pos;
+      }
+    }
+    final originalVal = strengthFn(center);
+    if (originalVal <= 0 || bestVal < originalVal * 1.25) return center;
+    return bestPos;
+  }
+
+  final newLeft = bestNear(origLeft, searchBandX, columnStrength);
+  final newRight = bestNear(origRight, searchBandX, columnStrength);
+  final newTop = bestNear(origTop, searchBandY, rowStrength);
+  final newBottom = bestNear(origBottom, searchBandY, rowStrength);
+
+  if (newRight <= newLeft || newBottom <= newTop) return box;
+
+  final snapped = BoundingBox(
+    x: regionX + (newLeft / cropWidth) * regionWidth,
+    y: regionY + (newTop / cropHeight) * regionHeight,
+    width: ((newRight - newLeft) / cropWidth) * regionWidth,
+    height: ((newBottom - newTop) / cropHeight) * regionHeight,
+  );
+
+  return sanitizeLocalizedBox(snapped) ?? box;
 }

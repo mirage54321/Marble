@@ -99,7 +99,7 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen> {
       final newCamera = await stage('createController', () async {
         return CameraController(
           back,
-          kIsWeb ? ResolutionPreset.medium : ResolutionPreset.high,
+          ResolutionPreset.high,
           enableAudio: false,
           imageFormatGroup: ImageFormatGroup.yuv420,
         );
