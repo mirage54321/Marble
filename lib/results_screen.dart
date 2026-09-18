@@ -258,7 +258,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
       final refined = await refineFindingBox(widget.imageBytes, finding);
       if (refined != null) finding.box = refined;
     } catch (_) {
-      // Keep the original box if refinement fails; still show what we have.
     } finally {
       finding.isBoxRefined = true;
       if (mounted) {
@@ -569,7 +568,7 @@ class _BoxPainter extends CustomPainter {
         imageRect.top + box.y * imageRect.height,
         box.width * imageRect.width,
         box.height * imageRect.height,
-      );
+      ).inflate(4);
 
       final paint = Paint()
         ..color = isDimmed ? color.withValues(alpha: 0.25) : color
