@@ -539,3 +539,7 @@ I have 250+ views, 100+ new users, and 100+ scans logged! I am very happy that I
 
 ![alt text](photos/image51.png)
 ![alt text](photos/image52.png)
+
+
+### Devlog #30 ->
+Not a code update,
