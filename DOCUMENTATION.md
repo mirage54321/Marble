@@ -541,10 +541,13 @@ I have 250+ views, 100+ new users, and 100+ scans logged! I am very happy that I
 ![alt text](photos/image52.png)
 
 
-### Devlog #30 ->
+## Devlog #30 ->
 Okay so I have been doing a lot of fine tuning on the AI for the scans but it still just isn't pixel perfect and I see it as a limiter to functionality. So basically I am just working on it. I am constantly tweaking it and making new changes like making the boxes bigger to fix it.
 I came across a new idea which is SAM. Basically, it stands for Segment Anything Model (from Meta). https://segment-anything.metademolab.com/. The next few days I am going to be working with it and I will see if it fixes up some of those pixel perfect mistakes!!
 
 ![alt text](photos/image53.png)
 ![alt text](photos/image54.png)
 
+## Devlog #31 ->
+So, super sad news. Turns out I have to pay for SAM. I'm not against the idea of paying SAM at all I just want to make sure there is nothing else I can do before I use it. 
+The things I have tried changing are __________.
