@@ -556,3 +556,14 @@ The things I have tried changing are: tightening the prompts, switching from the
 Genuinely better than where it started. Still not pixel-perfect though. SAM's cheap (~$0.0007 a pop) but it's not $0, and I don't wanna hook up a card for a side project just yet. Might revisit SAM later if this becomes an actual "project" project.
 
 ![alt text](photos/image55.png)
+
+
+## Devlog #32 ->
+
+Okay so the stuff I added last time actually made things worse. Fixed it though.
+Turns out the edge-snapping pass was too trigger-happy. A robot photo has strong edges literally everywhere so it kept grabbing the nearest strong edge instead of the actual boundary of whatever was flagged.
+I also dialed the photo quality back from 100 to 92. Turns out 100 doesn't actually add meaningful detail over the low 90s.
+Still isn't perfect but I think this will be the best it can get? Perhaps?
+Just gotta add the changes into rules_scan.dart.
+Live app: https://mirage54321.github.io/Marble/
+![alt text](photos/image56.png)
