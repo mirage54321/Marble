@@ -550,4 +550,7 @@ I came across a new idea which is SAM. Basically, it stands for Segment Anything
 
 ## Devlog #31 ->
 So, super sad news. Turns out I have to pay for SAM. I'm not against the idea of paying SAM at all I just want to make sure there is nothing else I can do before I use it. 
-The things I have tried changing are __________.
+
+The things I have tried changing are: tightening the prompts, switching from the point+crop+re-detect pipeline to single-pass box detection, cross-checking every box against where the AI thinks the robot actually is, bumping the photo quality so the AI isn't working off a compressed image, and adding a free on-device edge-snap pass that nudges boxes toward real contrast edges after the AI guesses.
+
+Genuinely better than where it started. Still not pixel-perfect though. SAM's cheap (~$0.0007 a pop) but it's not $0, and I don't wanna hook up a card for a side project just yet. Might revisit SAM later if this becomes an actual "project" project.
