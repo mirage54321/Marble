@@ -8559,24 +8559,24 @@ break
 case 6:case 1:return A.u(q,r)
 case 2:return A.t(o.at(-1),r)}})
 return A.v($async$a5q,r)},
-bdV(c9,d0){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,c0,c1,c2,c3,c4,c5,c6,c7,c8=A.aOX(c9)
-if(c8==null)return d0
-s=d0.a
-r=d0.c
+bdV(d2,d3){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,c0,c1,c2,c3,c4,c5,c6,c7,c8,c9,d0,d1=A.aOX(d2)
+if(d1==null)return d3
+s=d3.a
+r=d3.c
 q=B.d.aq(s-r*0.15,0,1)
-p=d0.b
-o=d0.d
+p=d3.b
+o=d3.d
 n=B.d.aq(p-o*0.15,0,1)
 m=B.d.aq(s+r*1.15,0,1)
 l=B.d.aq(p+o*1.15,0,1)
 k=B.d.aq(m-q,0.01,1)
 j=B.d.aq(l-n,0.01,1)
-i=B.b.aq(B.d.aw(q*c8.gcz()),0,c8.gcz()-1)
-h=B.b.aq(B.d.aw(n*c8.gaN()),0,c8.gaN()-1)
-g=B.b.aq(B.d.aw(k*c8.gcz()),1,c8.gcz()-i)
-f=B.b.aq(B.d.aw(j*c8.gaN()),1,c8.gaN()-h)
-if(g<6||f<6)return d0
-e=A.aX8(c8,f,g,i,h)
+i=B.b.aq(B.d.aw(q*d1.gcz()),0,d1.gcz()-1)
+h=B.b.aq(B.d.aw(n*d1.gaN()),0,d1.gaN()-1)
+g=B.b.aq(B.d.aw(k*d1.gcz()),1,d1.gcz()-i)
+f=B.b.aq(B.d.aw(j*d1.gaN()),1,d1.gaN()-h)
+if(g<6||f<6)return d3
+e=A.aX8(d1,f,g,i,h)
 d=t.Ly
 c=J.ha(f,d)
 for(b=t.i,a=0;a<f;++a)c[a]=A.b3(g,0,!1,b)
@@ -8602,18 +8602,22 @@ a4[a0][a1]=Math.sqrt(b6*b6+b7*b7)}b8=B.b.aq(B.d.aw((s-q)/k*g),0,b)
 b9=B.b.aq(B.d.aw((s+r-q)/k*g),0,b)
 c0=B.b.aq(B.d.aw((p-n)/j*f),0,d)
 c1=B.b.aq(B.d.aw((p+o-n)/j*f),0,d)
-c2=B.b.aq(B.d.aw(g*0.12),2,B.d.e5(g/3))
-c3=B.b.aq(B.d.aw(f*0.12),2,B.d.e5(f/3))
+c2=B.b.aq(B.d.aw(g*0.06),1,B.d.e5(g/5))
+c3=B.b.aq(B.d.aw(f*0.06),1,B.d.e5(f/5))
 s=new A.aKX(g,c0,c1,a4)
-r=new A.aKY(f,b8,b9,a4)
-p=new A.aKW()
-c4=p.$3(b8,c2,s)
-c5=p.$3(b9,c2,s)
-c6=p.$3(c0,c3,r)
-c7=p.$3(c1,c3,r)
-if(c5<=c4||c7<=c6)return d0
-s=A.a5p(new A.l3(q+c4/g*k,n+c6/f*j,(c5-c4)/g*k,(c7-c6)/f*j))
-return s==null?d0:s},
+p=new A.aKY(f,b8,b9,a4)
+d=new A.aKW()
+c4=d.$3(b8,c2,s)
+c5=d.$3(b9,c2,s)
+c6=d.$3(c0,c3,p)
+c7=d.$3(c1,c3,p)
+if(c5<=c4||c7<=c6)return d3
+c8=A.a5p(new A.l3(q+c4/g*k,n+c6/f*j,(c5-c4)/g*k,(c7-c6)/f*j))
+if(c8==null)return d3
+c9=r*o
+d0=c8.c*c8.d
+if(c9<=0||d0<c9*0.65||d0>c9*1.35)return d3
+return c8},
 a68:function a68(a){this.a=a},
 a66:function a66(a){this.a=a},
 ZD:function ZD(a,b,c){this.a=a
@@ -49295,12 +49299,16 @@ for(s=o.b,r=o.c,q=o.d,p=0;s<=r;++s)p+=q[a][s]
 return p},
 $S:239}
 A.aKW.prototype={
-$3(a,b,c){var s,r,q,p,o,n=c.$1(a)
-for(s=-b,r=a;s<=b;++s){q=a+s
-p=c.$1(q)
-if(p>n){n=p
-r=q}}o=c.$1(a)
-if(o<=0||n<o*1.25)return a
+$3(a,b,c){var s,r,q,p,o,n,m,l,k=c.$1(a)
+for(s=-b,r=a,q=0;s<=b;++s){if(s===0)continue
+p=a+s
+o=c.$1(p)
+if(o>k){q=k
+k=o
+r=p}else if(o>q)q=o}n=c.$1(a)
+m=n>0&&k>n*1.7
+l=q<=0||k>q*1.4
+if(!m||!l)return a
 return r},
 $S:498}
 A.qG.prototype={
@@ -53571,7 +53579,7 @@ A.L3.prototype={
 xe(){var s=0,r=A.w(t.H),q=this,p,o
 var $async$xe=A.x(function(a,b){if(a===1)return A.t(b,r)
 for(;;)switch(s){case 0:s=2
-return A.o(q.x.a5J(100,B.rO),$async$xe)
+return A.o(q.x.a5J(92,B.rO),$async$xe)
 case 2:p=b
 s=p!=null?3:4
 break
@@ -53713,7 +53721,7 @@ A.L9.prototype={
 zC(){var s=0,r=A.w(t.H),q=this,p,o
 var $async$zC=A.x(function(a,b){if(a===1)return A.t(b,r)
 for(;;)switch(s){case 0:s=2
-return A.o(q.r.a5J(100,B.rO),$async$zC)
+return A.o(q.r.a5J(92,B.rO),$async$zC)
 case 2:p=b
 s=p!=null?3:4
 break

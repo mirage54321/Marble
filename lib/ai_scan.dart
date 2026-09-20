@@ -747,8 +747,8 @@ BoundingBox snapBoxToEdges(Uint8List imageBytes, BoundingBox box) {
       .round()
       .clamp(0, cropHeight - 1);
 
-  final searchBandX = (cropWidth * 0.12).round().clamp(2, (cropWidth / 3).floor());
-  final searchBandY = (cropHeight * 0.12).round().clamp(2, (cropHeight / 3).floor());
+  final searchBandX = (cropWidth * 0.06).round().clamp(1, (cropWidth / 5).floor());
+  final searchBandY = (cropHeight * 0.06).round().clamp(1, (cropHeight / 5).floor());
 
   double columnStrength(int x) {
     if (x < 0 || x >= cropWidth) return 0.0;
@@ -767,16 +767,23 @@ BoundingBox snapBoxToEdges(Uint8List imageBytes, BoundingBox box) {
   int bestNear(int center, int band, double Function(int) strengthFn) {
     var bestPos = center;
     var bestVal = strengthFn(center);
+    var runnerUpVal = 0.0;
     for (var d = -band; d <= band; d++) {
+      if (d == 0) continue;
       final pos = center + d;
       final val = strengthFn(pos);
       if (val > bestVal) {
+        runnerUpVal = bestVal;
         bestVal = val;
         bestPos = pos;
+      } else if (val > runnerUpVal) {
+        runnerUpVal = val;
       }
     }
     final originalVal = strengthFn(center);
-    if (originalVal <= 0 || bestVal < originalVal * 1.25) return center;
+    final isClearlyStrongerThanOriginal = originalVal > 0 && bestVal > originalVal * 1.7;
+    final isClearPeak = runnerUpVal <= 0 || bestVal > runnerUpVal * 1.4;
+    if (!isClearlyStrongerThanOriginal || !isClearPeak) return center;
     return bestPos;
   }
 
@@ -794,5 +801,16 @@ BoundingBox snapBoxToEdges(Uint8List imageBytes, BoundingBox box) {
     height: ((newBottom - newTop) / cropHeight) * regionHeight,
   );
 
-  return sanitizeLocalizedBox(snapped) ?? box;
+  final validated = sanitizeLocalizedBox(snapped);
+  if (validated == null) return box;
+
+  final originalArea = box.width * box.height;
+  final validatedArea = validated.width * validated.height;
+  if (originalArea <= 0 ||
+      validatedArea < originalArea * 0.65 ||
+      validatedArea > originalArea * 1.35) {
+    return box;
+  }
+
+  return validated;
 }

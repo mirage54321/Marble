@@ -30,7 +30,7 @@ class _RulesScreenState extends State<RulesScreen> {
   Future<void> _pickFromGallery() async {
     final picked = await _picker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 100,
+      imageQuality: 92,
     );
     if (picked != null) {
       final bytes = await picked.readAsBytes();
