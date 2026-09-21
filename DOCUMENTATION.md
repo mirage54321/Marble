@@ -564,6 +564,8 @@ Okay so the stuff I added last time actually made things worse. Fixed it though.
 Turns out the edge-snapping pass was too trigger-happy. A robot photo has strong edges literally everywhere so it kept grabbing the nearest strong edge instead of the actual boundary of whatever was flagged.
 I also dialed the photo quality back from 100 to 92. Turns out 100 doesn't actually add meaningful detail over the low 90s.
 Still isn't perfect but I think this will be the best it can get? Perhaps?
-Just gotta add the changes into rules_scan.dart.
+Now I just wanna work on fixing the huge delay when I click "show on photo".
+
 Live app: https://mirage54321.github.io/Marble/
+
 ![alt text](photos/image56.png)

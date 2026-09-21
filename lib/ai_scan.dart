@@ -583,10 +583,34 @@ Future<BoundingBox?> _refineOnce(
   }
 }
 
+bool? _replicateConfiguredCache;
+
+Future<bool> _isReplicateConfigured() async {
+  if (_replicateConfiguredCache != null) return _replicateConfiguredCache!;
+  try {
+    final response = await http
+        .get(Uri.parse('$_refineBase/health'))
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode != 200) {
+      _replicateConfiguredCache = false;
+      return false;
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final configured = data['replicateConfigured'] == true;
+    _replicateConfiguredCache = configured;
+    return configured;
+  } catch (_) {
+    _replicateConfiguredCache = false;
+    return false;
+  }
+}
+
 Future<BoundingBox?> segmentFindingMask(
   Uint8List imageBytes,
   Finding finding,
 ) async {
+  if (!await _isReplicateConfigured()) return null;
+
   final box = finding.box;
   if (box == null) return null;
   if (!ConnectivityCheck.isOnline) return null;
@@ -694,20 +718,37 @@ BoundingBox snapBoxToEdges(Uint8List imageBytes, BoundingBox box) {
   final cropX = (regionX * decoded.width).round().clamp(0, decoded.width - 1);
   final cropY =
       (regionY * decoded.height).round().clamp(0, decoded.height - 1);
-  final cropWidth =
+  final rawCropWidth =
       (regionWidth * decoded.width).round().clamp(1, decoded.width - cropX);
-  final cropHeight =
+  final rawCropHeight =
       (regionHeight * decoded.height).round().clamp(1, decoded.height - cropY);
 
-  if (cropWidth < 6 || cropHeight < 6) return box;
+  if (rawCropWidth < 6 || rawCropHeight < 6) return box;
 
-  final crop = img.copyCrop(
+  final rawCrop = img.copyCrop(
     decoded,
     x: cropX,
     y: cropY,
-    width: cropWidth,
-    height: cropHeight,
+    width: rawCropWidth,
+    height: rawCropHeight,
   );
+
+  const maxWorkingDimension = 320;
+  final largestSide = math.max(rawCrop.width, rawCrop.height);
+  final scaleDown =
+      largestSide > maxWorkingDimension ? maxWorkingDimension / largestSide : 1.0;
+
+  final crop = scaleDown < 1.0
+      ? img.copyResize(
+          rawCrop,
+          width: (rawCrop.width * scaleDown).round().clamp(1, rawCrop.width),
+          height:
+              (rawCrop.height * scaleDown).round().clamp(1, rawCrop.height),
+        )
+      : rawCrop;
+
+  final cropWidth = crop.width;
+  final cropHeight = crop.height;
 
   final gray = List.generate(cropHeight, (_) => List<double>.filled(cropWidth, 0));
   for (var y = 0; y < cropHeight; y++) {
