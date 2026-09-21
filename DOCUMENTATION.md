@@ -569,3 +569,12 @@ Now I just wanna work on fixing the huge delay when I click "show on photo".
 Live app: https://mirage54321.github.io/Marble/
 
 ![alt text](photos/image56.png)
+
+## Devlog #33 ->
+Fixed the "show on photo" lag. I ripped out the background AI refine call that was making every tap wait on the network. It is now back to instant, fully local highlighting, zero delay. The smarter box-precision code isn't gone, just unplugged for now. If it comes back, it'll run automatically right after a scan finishes instead of making taps wait.
+Working more on the pixel perfectness (even though I said I wouldn't).
+
+Live app: https://mirage54321.github.io/Marble/
+
+![alt text](photos/image57.png)
+
