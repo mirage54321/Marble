@@ -25,7 +25,6 @@ class ResultsScreen extends StatefulWidget {
 
 class _ResultsScreenState extends State<ResultsScreen> {
   int? _highlightedIndex;
-  int? _refiningIndex;
   late final String _scanId;
 
   late final Future<ui.Image> _decodedImage;
@@ -241,35 +240,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  Future<void> _showOnPhoto(int index, Finding finding) async {
-    final isHighlighted = _highlightedIndex == index;
-    if (isHighlighted) {
-      setState(() => _highlightedIndex = null);
-      return;
-    }
-
-    setState(() => _highlightedIndex = index);
-
-    if (finding.isBoxRefined || finding.box == null) {
-      return;
-    }
-
-    setState(() => _refiningIndex = index);
-    try {
-      final refined = await refineFindingBox(widget.imageBytes, finding);
-      if (refined != null) finding.box = refined;
-
-      if (finding.box != null) {
-        finding.box = snapBoxToEdges(widget.imageBytes, finding.box!);
-      }
-    } catch (_) {
-    } finally {
-      finding.isBoxRefined = true;
-      if (mounted) {
-        setState(() => _refiningIndex = null);
-      }
-    }
-  }
 
   Widget _buildFinding({
     required int index,
@@ -283,12 +253,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
             ? 'Warning'
             : 'All clear';
     final isHighlighted = _highlightedIndex == index;
-    final isRefining = _refiningIndex == index;
 
     return TapCursor(
-      onTap: finding.box == null || isRefining
+      onTap: finding.box == null
           ? null
-          : () => _showOnPhoto(index, finding),
+          : () => setState(() {
+                _highlightedIndex = isHighlighted ? null : index;
+              }),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
         padding: const EdgeInsets.all(14),
@@ -365,25 +336,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  if (isRefining)
-                                    SizedBox(
-                                      width: 11,
-                                      height: 11,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 1.5,
-                                        color: Colors.grey[600],
-                                      ),
-                                    )
-                                  else
-                                    Icon(Icons.my_location,
-                                        size: 11, color: Colors.grey[600]),
+                                  Icon(Icons.my_location,
+                                      size: 11, color: Colors.grey[600]),
                                   const SizedBox(width: 3),
                                   Text(
-                                    isRefining
-                                        ? 'Tracing edges...'
-                                        : isHighlighted
-                                            ? 'Showing on photo'
-                                            : 'Show on photo',
+                                    isHighlighted
+                                        ? 'Showing on photo'
+                                        : 'Show on photo',
                                     style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w500,
