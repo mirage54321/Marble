@@ -433,22 +433,6 @@ _JpegCrop _cropToJpeg(
   );
 }
 
-String _cropToBase64Jpeg(
-  Uint8List originalBytes,
-  double regionX,
-  double regionY,
-  double regionWidth,
-  double regionHeight,
-) {
-  return _cropToJpeg(
-    originalBytes,
-    regionX,
-    regionY,
-    regionWidth,
-    regionHeight,
-  ).base64Jpeg;
-}
-
 Future<BoundingBox?> refineFindingBox(
   Uint8List imageBytes,
   Finding finding, {
@@ -470,7 +454,7 @@ Future<BoundingBox?> refineFindingBox(
   final regionWidth = (regionRight - regionLeft).clamp(0.1, 1.0);
   final regionHeight = (regionBottom - regionTop).clamp(0.1, 1.0);
 
-  final base64Crop = _cropToBase64Jpeg(
+  final crop = _cropToJpeg(
     imageBytes,
     regionX,
     regionY,
@@ -481,7 +465,9 @@ Future<BoundingBox?> refineFindingBox(
   try {
     return await withBackoffRetry<BoundingBox?>(
       () => _refineOnce(
-        base64Crop,
+        crop.base64Jpeg,
+        crop.width,
+        crop.height,
         finding.title,
         finding.description,
         regionX,
@@ -498,8 +484,62 @@ Future<BoundingBox?> refineFindingBox(
   }
 }
 
+BoundingBox? _tightBoxFromMask(
+  String maskData,
+  int boxPixelWidth,
+  int boxPixelHeight,
+) {
+  try {
+    var b64 = maskData;
+    final commaIdx = b64.indexOf(',');
+    if (b64.startsWith('data:') && commaIdx != -1) {
+      b64 = b64.substring(commaIdx + 1);
+    }
+
+    final decoded = img.decodeImage(base64Decode(b64));
+    if (decoded == null) return null;
+
+    final resized = img.copyResize(
+      decoded,
+      width: boxPixelWidth.clamp(1, 4096),
+      height: boxPixelHeight.clamp(1, 4096),
+    );
+
+    var minX = resized.width;
+    var minY = resized.height;
+    var maxX = -1;
+    var maxY = -1;
+
+    for (var y = 0; y < resized.height; y++) {
+      for (var x = 0; x < resized.width; x++) {
+        final pixel = resized.getPixel(x, y);
+        final luminance = (pixel.r + pixel.g + pixel.b) / 3.0;
+        if (luminance > 127) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX < minX || maxY < minY) return null;
+
+    return BoundingBox(
+      x: minX / resized.width,
+      y: minY / resized.height,
+      width: (maxX - minX + 1) / resized.width,
+      height: (maxY - minY + 1) / resized.height,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 Future<BoundingBox?> _refineOnce(
   String base64Crop,
+  int cropPixelWidth,
+  int cropPixelHeight,
   String title,
   String description,
   double regionX,
@@ -516,14 +556,17 @@ Future<BoundingBox?> _refineOnce(
                 'robot photo. Somewhere in this crop is the following '
                 'specific item:\n\nTitle: $title\nDescription: '
                 '$description\n\n'
-                'Give the tightest possible bounding box around exactly '
-                'that item, tracing its real visible edges precisely, '
-                'not a loose approximation. Use Gemini\'s standard '
-                '"box_2d" format: [ymin, xmin, ymax, xmax], each 0-1000, '
-                'relative to THIS CROP. If you genuinely cannot find this '
-                'exact item anywhere in this crop, respond with '
-                '{"box_2d":null}. Respond only with JSON in this exact '
-                'format: {"box_2d":[0,0,0,0]}',
+                'Find exactly that item and give both its bounding box '
+                'and its segmentation mask. If you genuinely cannot find '
+                'this exact item anywhere in this crop, respond with '
+                '{"items":[]}. Output a JSON object with an "items" list '
+                'where each entry contains the 2D bounding box in the '
+                'key "box_2d" as [ymin, xmin, ymax, xmax], each 0-1000 '
+                'relative to this crop, and the segmentation mask in the '
+                'key "mask" as a base64 encoded PNG probability map '
+                'covering just that bounding box. Respond only with JSON '
+                'in this exact format: {"items":[{"box_2d":[0,0,0,0],'
+                '"mask":"..."}]}',
           },
           {
             'inline_data': {
@@ -536,9 +579,9 @@ Future<BoundingBox?> _refineOnce(
     ],
     'generationConfig': {
       'temperature': 0,
-      'maxOutputTokens': 1024,
+      'maxOutputTokens': 2048,
       'responseMimeType': 'application/json',
-      'thinkingConfig': {'thinkingBudget': 1024},
+      'thinkingConfig': {'thinkingBudget': 0},
     },
   };
 
@@ -567,15 +610,39 @@ Future<BoundingBox?> _refineOnce(
 
   try {
     final parsed = jsonDecode(rawText) as Map<String, dynamic>;
-    final box2d = parsed['box_2d'] as List<dynamic>?;
+    final items = parsed['items'] as List<dynamic>?;
+    if (items == null || items.isEmpty) return null;
+
+    final item = items.first as Map<String, dynamic>;
+    final box2d = item['box_2d'] as List<dynamic>?;
     if (box2d == null || box2d.length != 4) return null;
 
     final cropBox = BoundingBox.fromBox2D(box2d);
+
+    var effectiveCropBox = cropBox;
+    final maskData = item['mask'] as String?;
+    if (maskData != null) {
+      final boxPixelWidth = (cropBox.width * cropPixelWidth).round();
+      final boxPixelHeight = (cropBox.height * cropPixelHeight).round();
+      if (boxPixelWidth > 0 && boxPixelHeight > 0) {
+        final tight =
+            _tightBoxFromMask(maskData, boxPixelWidth, boxPixelHeight);
+        if (tight != null) {
+          effectiveCropBox = BoundingBox(
+            x: cropBox.x + tight.x * cropBox.width,
+            y: cropBox.y + tight.y * cropBox.height,
+            width: tight.width * cropBox.width,
+            height: tight.height * cropBox.height,
+          );
+        }
+      }
+    }
+
     final fullBox = BoundingBox(
-      x: regionX + cropBox.x * regionWidth,
-      y: regionY + cropBox.y * regionHeight,
-      width: cropBox.width * regionWidth,
-      height: cropBox.height * regionHeight,
+      x: regionX + effectiveCropBox.x * regionWidth,
+      y: regionY + effectiveCropBox.y * regionHeight,
+      width: effectiveCropBox.width * regionWidth,
+      height: effectiveCropBox.height * regionHeight,
     );
     return sanitizeLocalizedBox(fullBox);
   } catch (e) {

@@ -248,8 +248,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
       return;
     }
 
+    setState(() => _highlightedIndex = index);
+
     if (finding.isBoxRefined || finding.box == null) {
-      setState(() => _highlightedIndex = index);
       return;
     }
 
@@ -258,21 +259,14 @@ class _ResultsScreenState extends State<ResultsScreen> {
       final refined = await refineFindingBox(widget.imageBytes, finding);
       if (refined != null) finding.box = refined;
 
-      final segmented = await segmentFindingMask(widget.imageBytes, finding);
-      if (segmented != null) finding.box = segmented;
-
       if (finding.box != null) {
         finding.box = snapBoxToEdges(widget.imageBytes, finding.box!);
       }
     } catch (_) {
-      // Keep whatever box we already have if refinement/segmentation fails.
     } finally {
       finding.isBoxRefined = true;
       if (mounted) {
-        setState(() {
-          _refiningIndex = null;
-          _highlightedIndex = index;
-        });
+        setState(() => _refiningIndex = null);
       }
     }
   }
