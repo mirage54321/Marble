@@ -6,6 +6,7 @@ import 'tap_cursor.dart';
 import 'constants.dart';
 import 'ai_scan.dart';
 import 'scan_screen.dart';
+import 'gemini_segment.dart';
 
 class ResultsScreen extends StatefulWidget {
   final Uint8List imageBytes;
@@ -28,12 +29,75 @@ class _ResultsScreenState extends State<ResultsScreen> {
   late final String _scanId;
 
   late final Future<ui.Image> _decodedImage;
+  final Map<int, _MaskOverlay> _overlays = {};
+  bool _segmenting = false;
 
   @override
   void initState() {
     super.initState();
     _scanId = 'scan_${DateTime.now().microsecondsSinceEpoch}';
     _decodedImage = _decodeImage(widget.imageBytes);
+    _segmenting = widget.findings.any((f) => f.box != null);
+    if (_segmenting) unawaited(_runSegmentation());
+  }
+
+  Future<void> _runSegmentation() async {
+    try {
+      await segmentFindings(
+        widget.imageBytes,
+        findings,
+        onMask: (index, mask) async {
+          final overlay =
+              await _buildOverlay(mask, _severityColor(findings[index].severity));
+          if (!mounted) return;
+          setState(() {
+            findings[index].mask = mask;
+            findings[index].box = mask.box;
+            findings[index].isBoxRefined = true;
+            _overlays[index] = overlay;
+          });
+        },
+      );
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _segmenting = false);
+    }
+  }
+
+  Future<ui.Image> _pixelsToImage(Uint8List rgba, int w, int h) {
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(rgba, w, h, ui.PixelFormat.rgba8888, completer.complete);
+    return completer.future;
+  }
+
+
+  Future<_MaskOverlay> _buildOverlay(SegMask m, Color color) async {
+    final w = m.width, h = m.height;
+    bool on(int x, int y) =>
+        x >= 0 && y >= 0 && x < w && y < h && m.alpha[y * w + x] > 127;
+
+    final cr = (color.r * 255).round();
+    final cg = (color.g * 255).round();
+    final cb = (color.b * 255).round();
+
+    final fill = Uint8List(w * h * 4);
+    final edge = Uint8List(w * h * 4);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        if (!on(x, y)) continue;
+        final i = (y * w + x) * 4;
+        fill[i] = cr; fill[i + 1] = cg; fill[i + 2] = cb; fill[i + 3] = 255;
+        final isEdge =
+            !on(x - 2, y) || !on(x + 2, y) || !on(x, y - 2) || !on(x, y + 2);
+        if (isEdge) {
+          edge[i] = cr; edge[i + 1] = cg; edge[i + 2] = cb; edge[i + 3] = 255;
+        }
+      }
+    }
+    return _MaskOverlay(
+      await _pixelsToImage(fill, w, h),
+      await _pixelsToImage(edge, w, h),
+    );
   }
 
   Future<ui.Image> _decodeImage(Uint8List bytes) {
@@ -147,12 +211,42 @@ class _ResultsScreenState extends State<ResultsScreen> {
                         fit: BoxFit.contain,
                         width: double.infinity,
                       ),
+                      if (_segmenting)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 10,
+                                  height: 10,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 1.5, color: Colors.white),
+                                ),
+                                SizedBox(width: 6),
+                                Text('Refining outlines…',
+                                    style: TextStyle(
+                                        color: Colors.white, fontSize: 10)),
+                              ],
+                            ),
+                          ),
+                        ),
                       if (snapshot.hasData)
                         CustomPaint(
                           size: containerSize,
                           painter: _BoxPainter(
                             findings: findings,
                             highlightedIndex: _highlightedIndex,
+                            overlays: _overlays,
+                            maskVersion: _overlays.length,
                             imageSize: Size(
                               snapshot.data!.width.toDouble(),
                               snapshot.data!.height.toDouble(),
@@ -479,15 +573,31 @@ class _ResultsScreenState extends State<ResultsScreen> {
   }
 }
 
+Color _severityColor(ScanStatus s) => s == ScanStatus.critical
+    ? const Color(0xFFD93025)
+    : s == ScanStatus.warning
+        ? const Color(0xFFE8A000)
+        : const Color(0xFF00B3AC);
+
+class _MaskOverlay {
+  final ui.Image fill;
+  final ui.Image edge;
+  const _MaskOverlay(this.fill, this.edge);
+}
+
 class _BoxPainter extends CustomPainter {
   final List<Finding> findings;
   final int? highlightedIndex;
   final Size imageSize;
+  final Map<int, _MaskOverlay> overlays;
+  final int maskVersion;
 
   _BoxPainter({
     required this.findings,
     required this.highlightedIndex,
     required this.imageSize,
+    required this.overlays,
+    required this.maskVersion,
   });
 
   Rect _containedImageRect(Size containerSize) {
@@ -518,26 +628,54 @@ class _BoxPainter extends CustomPainter {
       if (box == null) continue;
 
       final isDimmed = highlightedIndex != null && highlightedIndex != i;
-      final color = finding.severity == ScanStatus.critical
-          ? const Color(0xFFD93025)
-          : finding.severity == ScanStatus.warning
-              ? const Color(0xFFE8A000)
-              : const Color(0xFF00B3AC);
+      final color = _severityColor(finding.severity);
+      final overlay = overlays[i];
 
-      final rect = Rect.fromLTWH(
-        imageRect.left + box.x * imageRect.width,
-        imageRect.top + box.y * imageRect.height,
-        box.width * imageRect.width,
-        box.height * imageRect.height,
-      ).inflate(4);
+      Rect labelRect;
 
-      final paint = Paint()
-        ..color = isDimmed ? color.withValues(alpha: 0.25) : color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = isDimmed ? 1.5 : 2.5;
+      if (overlay != null) {
+        final dst = Rect.fromLTWH(
+          imageRect.left + box.x * imageRect.width,
+          imageRect.top + box.y * imageRect.height,
+          box.width * imageRect.width,
+          box.height * imageRect.height,
+        );
+        final src = Rect.fromLTWH(0, 0, overlay.fill.width.toDouble(),
+            overlay.fill.height.toDouble());
 
-      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(6));
-      canvas.drawRRect(rrect, paint);
+        canvas.drawImageRect(
+          overlay.fill,
+          src,
+          dst,
+          Paint()
+            ..filterQuality = FilterQuality.medium
+            ..color = Color.fromRGBO(0, 0, 0, isDimmed ? 0.08 : 0.30),
+        );
+        canvas.drawImageRect(
+          overlay.edge,
+          src,
+          dst,
+          Paint()
+            ..filterQuality = FilterQuality.medium
+            ..color = Color.fromRGBO(0, 0, 0, isDimmed ? 0.35 : 1.0),
+        );
+        labelRect = dst;
+      } else {
+        final rect = Rect.fromLTWH(
+          imageRect.left + box.x * imageRect.width,
+          imageRect.top + box.y * imageRect.height,
+          box.width * imageRect.width,
+          box.height * imageRect.height,
+        ).inflate(4);
+
+        final paint = Paint()
+          ..color = isDimmed ? color.withValues(alpha: 0.25) : color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = isDimmed ? 1.5 : 2.5;
+        canvas.drawRRect(
+            RRect.fromRectAndRadius(rect, const Radius.circular(6)), paint);
+        labelRect = rect;
+      }
 
       if (!isDimmed) {
         final labelPainter = TextPainter(
@@ -552,11 +690,12 @@ class _BoxPainter extends CustomPainter {
           textDirection: TextDirection.ltr,
         )..layout();
 
-        final labelTop =
-            (rect.top - 18) < imageRect.top ? rect.top : rect.top - 18;
+        final labelTop = (labelRect.top - 18) < imageRect.top
+            ? labelRect.top
+            : labelRect.top - 18;
 
         final labelBgRect = Rect.fromLTWH(
-          rect.left,
+          labelRect.left,
           labelTop,
           labelPainter.width + 10,
           18,
@@ -580,7 +719,8 @@ class _BoxPainter extends CustomPainter {
   bool shouldRepaint(covariant _BoxPainter oldDelegate) {
     return oldDelegate.highlightedIndex != highlightedIndex ||
         oldDelegate.findings != findings ||
-        oldDelegate.imageSize != imageSize;
+        oldDelegate.imageSize != imageSize ||
+        oldDelegate.maskVersion != maskVersion;
   }
 }
 

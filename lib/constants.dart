@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 const TealScan      = Color(0xFF00B3AC);
@@ -58,6 +59,20 @@ class BoundingBox {
   }
 }
 
+class SegMask {
+  final BoundingBox box;
+  final int width;
+  final int height;
+  final Uint8List alpha;
+
+  const SegMask({
+    required this.box,
+    required this.width,
+    required this.height,
+    required this.alpha,
+  });
+}
+
 class Finding {
   final String title;
   final String description;
@@ -65,6 +80,7 @@ class Finding {
   BoundingBox? box;
   bool isReported;
   bool isBoxRefined;
+  SegMask? mask;
 
   Finding({
     required this.title,
@@ -73,6 +89,7 @@ class Finding {
     this.box,
     this.isReported = false,
     this.isBoxRefined = false,
+    this.mask,
   });
 
   factory Finding.fromJson(Map<String, dynamic> json) {
