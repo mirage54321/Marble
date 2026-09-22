@@ -9,7 +9,6 @@ import 'package:image/image.dart' as img;
 import 'ai_scan.dart' show boxOverlapRatio, severityRank;
 import 'connectivity_check.dart';
 import 'constants.dart';
-import 'retry_helper.dart';
 
 const String _base = 'https://ridgeboticsapp.onrender.com';
 
@@ -42,14 +41,13 @@ Future<void> segmentFindings(
   for (final i in candidates.take(maxItems)) {
     SegMask? mask;
     try {
-      mask = await withBackoffRetry<SegMask?>(
-        () => _segmentOnce(photo, findings[i]),
-        maxAttempts: 2,
-        initialDelay: const Duration(seconds: 2),
-        isRetryable: (e) => e.toString().contains('experiencing high demand'),
-      );
+      mask = await _segmentOnce(photo, findings[i]);
     } catch (e) {
-      debugPrint('[segment] "${findings[i].title}" gave up after retries: $e');
+      if (e.toString().contains('experiencing high demand')) {
+        debugPrint('[segment] quota hit on "${findings[i].title}", stopping for this scan');
+        return;
+      }
+      debugPrint('[segment] "${findings[i].title}" failed: $e');
       mask = null;
     }
     if (mask != null && onMask != null) {
@@ -120,7 +118,7 @@ Future<SegMask?> _segmentOnce(img.Image photo, Finding finding) async {
 
   final response = await http
       .post(
-        Uri.parse('$_base/analyzeImage'),
+        Uri.parse('$_base/segmentImage'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
       )

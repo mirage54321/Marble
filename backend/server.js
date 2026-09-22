@@ -11,6 +11,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_SEGMENT_API_KEYS = [
+  process.env.GEMINI_API_KEY_1,
+  process.env.GEMINI_API_KEY_2,
+  process.env.GEMINI_API_KEY_3,
+].filter(Boolean);
+if (GEMINI_SEGMENT_API_KEYS.length === 0 && GEMINI_API_KEY) {
+  GEMINI_SEGMENT_API_KEYS.push(GEMINI_API_KEY);
+}
 const DB_NAME = process.env.DB_NAME || 'ridgebotics';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
 
@@ -96,6 +104,68 @@ async function callGeminiWithRetry(url, body) {
   } finally {
     releaseGeminiSlot();
   }
+}
+
+let segmentKeyCursor = 0;
+const segmentKeyExhaustedUntil = new Map();
+
+async function callGeminiSegmentWithKeyRotation(body) {
+  const keys = GEMINI_SEGMENT_API_KEYS;
+  if (keys.length === 0) {
+    return { status: 503, data: { error: 'No Gemini segmentation keys configured' } };
+  }
+
+  const order = [];
+  for (let i = 0; i < keys.length; i++) {
+    order.push(keys[(segmentKeyCursor + i) % keys.length]);
+  }
+  segmentKeyCursor = (segmentKeyCursor + 1) % keys.length;
+
+  let lastStatus = 503;
+  let lastData = { error: 'All segmentation keys are exhausted for today' };
+
+  for (const key of order) {
+    const exhaustedUntil = segmentKeyExhaustedUntil.get(key) || 0;
+    if (Date.now() < exhaustedUntil) {
+      continue;
+    }
+
+    await acquireGeminiSlot();
+    let response;
+    let data;
+    try {
+      response = await fetch(`${GEMINI_SCAN_URL}?key=${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      data = await response.json();
+    } finally {
+      releaseGeminiSlot();
+    }
+
+    if (response.ok) {
+      return { status: response.status, data };
+    }
+
+    lastStatus = response.status;
+    lastData = data;
+
+    if (response.status === 429) {
+      segmentKeyExhaustedUntil.set(key, Date.now() + 20 * 60 * 60 * 1000);
+      console.warn(`Segment key ...${key.slice(-4)} hit its daily quota, rotating to next key`);
+      continue;
+    }
+
+    if (response.status === 503) {
+      console.warn(`Segment key ...${key.slice(-4)} got 503 (overloaded), rotating to next key`);
+      continue;
+    }
+
+    return { status: response.status, data };
+  }
+
+  return { status: lastStatus, data: lastData };
 }
 
 const TBA_AUTH_KEY = process.env.TBA_AUTH_KEY;
@@ -838,6 +908,8 @@ app.get('/health', (req, res) => {
     mongo: Boolean(teamsCollection && batteriesCollection),
     reportsMongo: Boolean(reportsCollection),
     geminiConfigured: Boolean(GEMINI_API_KEY),
+    geminiSegmentConfigured: GEMINI_SEGMENT_API_KEYS.length > 0,
+    geminiSegmentKeyCount: GEMINI_SEGMENT_API_KEYS.length,
     tbaConfigured: Boolean(TBA_AUTH_KEY),
     webpushConfigured,
   });
@@ -872,6 +944,22 @@ app.post('/analyzeImage', async (req, res) => {
     res.status(status).json(data);
   } catch (err) {
     console.error('Analyze image error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/segmentImage', async (req, res) => {
+  try {
+    if (GEMINI_SEGMENT_API_KEYS.length === 0) {
+      return res
+        .status(503)
+        .json({ error: 'No GEMINI_API_KEY_1/2/3 configured on the server' });
+    }
+
+    const { status, data } = await callGeminiSegmentWithKeyRotation(req.body);
+    res.status(status).json(data);
+  } catch (err) {
+    console.error('Segment image error:', err);
     res.status(500).json({ error: err.message });
   }
 });
