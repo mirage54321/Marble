@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 
@@ -15,7 +16,6 @@ const String _base = 'https://ridgeboticsapp.onrender.com';
 const int _maxCropSide = 1024;
 
 const int _maxMaskSide = 256;
-
 
 Future<void> segmentFindings(
   Uint8List imageBytes,
@@ -38,6 +38,7 @@ Future<void> segmentFindings(
   final photo = img.decodeImage(imageBytes);
   if (photo == null) return;
 
+  debugPrint('[segment] segmenting ${candidates.length} finding(s)');
   for (final i in candidates.take(maxItems)) {
     SegMask? mask;
     try {
@@ -47,10 +48,13 @@ Future<void> segmentFindings(
         initialDelay: const Duration(seconds: 2),
         isRetryable: (e) => e.toString().contains('experiencing high demand'),
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[segment] "${findings[i].title}" gave up after retries: $e');
       mask = null;
     }
-    if (mask != null && onMask != null) await onMask(i, mask);
+    if (mask != null && onMask != null) {
+      await onMask(i, mask);
+    }
   }
 }
 
@@ -125,6 +129,7 @@ Future<SegMask?> _segmentOnce(img.Image photo, Finding finding) async {
   final data = jsonDecode(response.body) as Map<String, dynamic>;
   if (response.statusCode != 200) {
     final msg = (data['error']?.toString() ?? '').toLowerCase();
+    debugPrint('[segment] "${finding.title}" HTTP ${response.statusCode}: $msg');
     if (msg.contains('quota') ||
         msg.contains('429') ||
         msg.contains('rate limit') ||
@@ -135,29 +140,50 @@ Future<SegMask?> _segmentOnce(img.Image photo, Finding finding) async {
   }
 
   final raw = _extractText(data);
-  if (raw == null || raw.isEmpty) return null;
+  if (raw == null || raw.isEmpty) {
+    debugPrint('[segment] "${finding.title}" empty/unparseable response text. '
+        'Raw payload: ${jsonEncode(data).substring(0, math.min(300, jsonEncode(data).length))}');
+    return null;
+  }
+
   try {
     final parsed = jsonDecode(raw);
     final List<dynamic> items = parsed is List
         ? parsed
         : (parsed is Map ? (parsed['items'] as List<dynamic>? ?? []) : []);
-    if (items.isEmpty) return null;
+    if (items.isEmpty) {
+      debugPrint('[segment] "${finding.title}" model returned no items. '
+          'Raw: ${raw.substring(0, math.min(300, raw.length))}');
+      return null;
+    }
 
     final item = items.first as Map<String, dynamic>;
     final box2d = item['box_2d'] as List<dynamic>?;
     final maskStr = item['mask'] as String?;
-    if (box2d == null || box2d.length != 4 || maskStr == null) return null;
+    if (box2d == null || box2d.length != 4 || maskStr == null) {
+      debugPrint('[segment] "${finding.title}" missing box_2d/mask keys. '
+          'Item keys: ${item.keys}');
+      return null;
+    }
 
     final cropBox = BoundingBox.fromBox2D(box2d);
     final boxPxW = cropBox.width * crop.width;
     final boxPxH = cropBox.height * crop.height;
-    if (boxPxW < 4 || boxPxH < 4) return null;
+    if (boxPxW < 4 || boxPxH < 4) {
+      debugPrint('[segment] "${finding.title}" box too small in crop '
+          '(${boxPxW.toStringAsFixed(1)}x${boxPxH.toStringAsFixed(1)}px)');
+      return null;
+    }
 
     var b64 = maskStr;
     final comma = b64.indexOf(',');
     if (b64.startsWith('data:') && comma != -1) b64 = b64.substring(comma + 1);
     final decoded = img.decodeImage(base64Decode(b64));
-    if (decoded == null) return null;
+    if (decoded == null) {
+      debugPrint('[segment] "${finding.title}" could not decode mask PNG '
+          '(${b64.length} base64 chars)');
+      return null;
+    }
 
     final longest = math.max(boxPxW, boxPxH);
     final scale = math.min(_maxMaskSide.toDouble(), longest) / longest;
@@ -184,8 +210,16 @@ Future<SegMask?> _segmentOnce(img.Image photo, Finding finding) async {
       }
     }
 
-    if (maxX < minX || maxY < minY) return null;
-    if (count / (mw * mh) < 0.03) return null;
+    if (maxX < minX || maxY < minY) {
+      debugPrint('[segment] "${finding.title}" mask thresholded to nothing '
+          '(grayscale=$grayscale, ${mw}x$mh)');
+      return null;
+    }
+    if (count / (mw * mh) < 0.03) {
+      debugPrint('[segment] "${finding.title}" mask covers only '
+          '${(count / (mw * mh) * 100).toStringAsFixed(1)}% of its box, rejecting');
+      return null;
+    }
 
     final tw = maxX - minX + 1;
     final th = maxY - minY + 1;
@@ -209,10 +243,22 @@ Future<SegMask?> _segmentOnce(img.Image photo, Finding finding) async {
       height: tightInCrop.height * regionH,
     );
 
-    if (boxOverlapRatio(fullBox, box) < 0.25) return null;
+    final overlap = boxOverlapRatio(fullBox, box);
+    if (overlap < 0.25) {
+      debugPrint('[segment] "${finding.title}" mask box barely overlaps the '
+          'original box (${(overlap * 100).toStringAsFixed(1)}%) — rejecting. '
+          'original=(${box.x.toStringAsFixed(2)},${box.y.toStringAsFixed(2)},'
+          '${box.width.toStringAsFixed(2)},${box.height.toStringAsFixed(2)}) '
+          'mask=(${fullBox.x.toStringAsFixed(2)},${fullBox.y.toStringAsFixed(2)},'
+          '${fullBox.width.toStringAsFixed(2)},${fullBox.height.toStringAsFixed(2)})');
+      return null;
+    }
 
+    debugPrint('[segment] "${finding.title}" OK, overlap '
+        '${(overlap * 100).toStringAsFixed(0)}%');
     return SegMask(box: fullBox, width: tw, height: th, alpha: trimmed);
-  } catch (_) {
+  } catch (e, st) {
+    debugPrint('[segment] "${finding.title}" threw during parsing: $e\n$st');
     return null;
   }
 }

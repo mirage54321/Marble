@@ -70,7 +70,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
     return completer.future;
   }
 
-
   Future<_MaskOverlay> _buildOverlay(SegMask m, Color color) async {
     final w = m.width, h = m.height;
     bool on(int x, int y) =>
@@ -333,7 +332,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
     );
   }
-
 
   Widget _buildFinding({
     required int index,
