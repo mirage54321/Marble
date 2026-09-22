@@ -22,8 +22,15 @@ if (GEMINI_SEGMENT_API_KEYS.length === 0 && GEMINI_API_KEY) {
 const DB_NAME = process.env.DB_NAME || 'ridgebotics';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
 
-const GEMINI_SCAN_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GEMINI_SCAN_MODELS = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-3.5-flash'];
+function geminiModelUrl(model) {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+}
+function isModelUnavailableError(status, data) {
+  if (status !== 404) return false;
+  const msg = ((data && data.error && data.error.message) || '').toLowerCase();
+  return msg.includes('no longer available') || msg.includes('not found');
+}
 const GEMINI_TEXT_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
 
@@ -130,39 +137,46 @@ async function callGeminiSegmentWithKeyRotation(body) {
       continue;
     }
 
-    await acquireGeminiSlot();
-    let response;
-    let data;
-    try {
-      response = await fetch(`${GEMINI_SCAN_URL}?key=${key}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      data = await response.json();
-    } finally {
-      releaseGeminiSlot();
-    }
+    for (const model of GEMINI_SCAN_MODELS) {
+      await acquireGeminiSlot();
+      let response;
+      let data;
+      try {
+        response = await fetch(`${geminiModelUrl(model)}?key=${key}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        data = await response.json();
+      } finally {
+        releaseGeminiSlot();
+      }
 
-    if (response.ok) {
+      if (response.ok) {
+        return { status: response.status, data };
+      }
+
+      lastStatus = response.status;
+      lastData = data;
+
+      if (isModelUnavailableError(response.status, data)) {
+        console.warn(`Model ${model} unavailable for segment key ...${key.slice(-4)}, trying next model`);
+        continue;
+      }
+
+      if (response.status === 429) {
+        segmentKeyExhaustedUntil.set(key, Date.now() + 20 * 60 * 60 * 1000);
+        console.warn(`Segment key ...${key.slice(-4)} hit its daily quota, rotating to next key`);
+        break;
+      }
+
+      if (response.status === 503) {
+        console.warn(`Segment key ...${key.slice(-4)} got 503 (overloaded), rotating to next key`);
+        break;
+      }
+
       return { status: response.status, data };
     }
-
-    lastStatus = response.status;
-    lastData = data;
-
-    if (response.status === 429) {
-      segmentKeyExhaustedUntil.set(key, Date.now() + 20 * 60 * 60 * 1000);
-      console.warn(`Segment key ...${key.slice(-4)} hit its daily quota, rotating to next key`);
-      continue;
-    }
-
-    if (response.status === 503) {
-      console.warn(`Segment key ...${key.slice(-4)} got 503 (overloaded), rotating to next key`);
-      continue;
-    }
-
-    return { status: response.status, data };
   }
 
   return { status: lastStatus, data: lastData };
@@ -928,16 +942,31 @@ app.get('/scans/count', async (req, res) => {
   }
 });
 
+async function callGeminiScanWithModelFallback(key, body) {
+  let lastStatus = 404;
+  let lastData = { error: 'No usable Gemini model for this key' };
+  for (const model of GEMINI_SCAN_MODELS) {
+    const { status, data } = await callGeminiWithRetry(`${geminiModelUrl(model)}?key=${key}`, body);
+    if (status >= 200 && status < 300) {
+      return { status, data };
+    }
+    lastStatus = status;
+    lastData = data;
+    if (!isModelUnavailableError(status, data)) {
+      return { status, data };
+    }
+    console.warn(`Model ${model} unavailable for main scan key, trying next model`);
+  }
+  return { status: lastStatus, data: lastData };
+}
+
 app.post('/analyzeImage', async (req, res) => {
   try {
     if (!GEMINI_API_KEY) {
       return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
     }
 
-    const { status, data } = await callGeminiWithRetry(
-      `${GEMINI_SCAN_URL}?key=${GEMINI_API_KEY}`,
-      req.body,
-    );
+    const { status, data } = await callGeminiScanWithModelFallback(GEMINI_API_KEY, req.body);
     if (status >= 200 && status < 300) {
       incrementScanCount();
     }
