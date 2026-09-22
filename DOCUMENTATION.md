@@ -578,3 +578,22 @@ Live app: https://mirage54321.github.io/Marble/
 
 ![alt text](photos/image57.png)
 
+## Devlog #34 ->
+Okay so remember how I said in Devlog #33 I ripped out the AI refine call because it was making "show on photo" laggy? Well I went and plugged something similar back in, except smarter this time (I hope).
+
+I found out Gemini 2.5 models can actually return real segmentation masks, not just boxes. Like actual pixel-level "this is the shape of the thing" instead of a rectangle that's close-ish. So I rebuilt the refine step from scratch.
+
+Then I hit the same wall I always hit: usage limits. Except this time it was way worse because now I'm making up to 6 extra Gemini calls per scan on top of the regular scan, all sharing the same free tier key as literally everyone else using the app. 20 requests a day.
+
+So I did the thing where I made separate Google Cloud projects and now I've got 3 separate keys rotating for segmentation specifically. If one hits its daily limit, it just moves to the next one instead of failing.
+
+AND THEN, right as I got that working, Gemini decided to retire 2.5-flash for new projects mid-conversation with me basically. So now both the main scanner and the segmentation thing try a little list of models in order (3.6 first, falls back to 2.5, falls back to 3.5).
+
+Still not sure if this whole segmentation thing is gonna be the "it's finally pixel perfect" fix I've been chasing since like Devlog #27, but the outlines that do come back look genuinely way better than the rectangles ever did.
+
+Live app: https://mirage54321.github.io/Marble/
+
+![alt text](photos/image58.png)
+![alt text](photos/image59.png)
+![alt text](photos/image60.png)
+
