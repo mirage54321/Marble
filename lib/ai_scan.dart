@@ -170,6 +170,9 @@ class AiService {
     if (response.statusCode != 200) {
       final errMsg = data['error']?.toString() ?? 'Unknown error';
       debugPrint('[scan] non-200 (${response.statusCode}): $errMsg');
+      if (errMsg.contains('all_quota_exhausted_for_today')) {
+        throw Exception('all AI capacity is used up for today, please try again after midnight Pacific time or do a manual inspection for now');
+      }
       if (_looksLikeQuotaError(errMsg)) {
         throw Exception('experiencing high demand');
       }

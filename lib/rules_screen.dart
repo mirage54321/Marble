@@ -86,6 +86,8 @@ class _RulesScreenState extends State<RulesScreen> {
       if (!mounted) return;
       if (e.toString().contains('offline')) {
         errorMessage = "Can't use the AI while offline. Get a better connection and try again.";
+      } else if (e.toString().contains('all AI capacity is used up for today')) {
+        errorMessage = "The AI has hit its daily limit and won't be available again until tomorrow. Sorry about that! Feel free to do a manual inspection in the meantime.";
       } else if (e.toString().contains('experiencing high demand')) {
         errorMessage = 'The AI is currently experiencing high demand. Please try again in a few seconds!';
       } else {

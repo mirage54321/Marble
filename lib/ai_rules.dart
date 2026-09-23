@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 
@@ -91,7 +92,7 @@ class AiRulesService {
       ],
       'generationConfig': {
         'temperature': 0,
-        'maxOutputTokens': 8192,
+        'maxOutputTokens': 16384,
         'responseMimeType': 'application/json',
         'thinkingConfig': {'thinkingBudget': 4096},
       },
@@ -109,6 +110,10 @@ class AiRulesService {
 
     if (response.statusCode != 200) {
       final errMsg = data['error']?.toString() ?? 'Unknown error';
+      debugPrint('[rules] non-200 (${response.statusCode}): $errMsg');
+      if (errMsg.contains('all_quota_exhausted_for_today')) {
+        throw Exception('all AI capacity is used up for today, please try again after midnight Pacific time or do a manual inspection for now');
+      }
       if (_looksLikeQuotaError(errMsg)) {
         throw Exception('experiencing high demand');
       }
@@ -117,7 +122,7 @@ class AiRulesService {
 
     final rawText = _extractText(data);
     if (rawText == null || rawText.isEmpty) {
-      throw Exception('experiencing high demand');
+      throw Exception("Could not read the AI's response, please try again.");
     }
 
     try {

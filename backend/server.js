@@ -956,6 +956,7 @@ function scanKeyPool() {
 async function callGeminiScanWithModelFallback(primaryKey, body) {
   const keys = [primaryKey, ...scanKeyPool().filter((k) => k !== primaryKey)];
 
+  let anyAttemptMade = false;
   let lastStatus = 503;
   let lastData = { error: 'All Gemini keys/models are exhausted for today' };
 
@@ -968,6 +969,7 @@ async function callGeminiScanWithModelFallback(primaryKey, body) {
       }
 
       const { status, data } = await callGeminiWithRetry(`${geminiModelUrl(model)}?key=${key}`, body, 1);
+      anyAttemptMade = true;
       if (status >= 200 && status < 300) {
         return { status, data };
       }
@@ -993,6 +995,16 @@ async function callGeminiScanWithModelFallback(primaryKey, body) {
 
       return { status, data };
     }
+  }
+
+  if (!anyAttemptMade) {
+    return {
+      status: 429,
+      data: {
+        error: 'all_quota_exhausted_for_today',
+        message: 'Every configured Gemini key/model is out of quota for today.',
+      },
+    };
   }
 
   return { status: lastStatus, data: lastData };
