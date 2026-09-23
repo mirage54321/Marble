@@ -150,7 +150,7 @@ class AiService {
       ],
       'generationConfig': {
         'temperature': 0,
-        'maxOutputTokens': 8192,
+        'maxOutputTokens': 16384,
         'responseMimeType': 'application/json',
         'thinkingConfig': {'thinkingBudget': 4096},
       },
@@ -176,7 +176,7 @@ class AiService {
 
     final rawText = _extractText(data);
     if (rawText == null || rawText.isEmpty) {
-      throw Exception('experiencing high demand');
+      throw Exception("Could not read the AI's response, please try again.");
     }
 
     try {
