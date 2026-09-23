@@ -942,21 +942,59 @@ app.get('/scans/count', async (req, res) => {
   }
 });
 
-async function callGeminiScanWithModelFallback(key, body) {
-  let lastStatus = 404;
-  let lastData = { error: 'No usable Gemini model for this key' };
-  for (const model of GEMINI_SCAN_MODELS) {
-    const { status, data } = await callGeminiWithRetry(`${geminiModelUrl(model)}?key=${key}`, body, 1);
-    if (status >= 200 && status < 300) {
-      return { status, data };
-    }
-    lastStatus = status;
-    lastData = data;
-    if (!isModelUnavailableError(status, data)) {
-      return { status, data };
-    }
-    console.warn(`Model ${model} unavailable for main scan key, trying next model`);
+const scanComboExhaustedUntil = new Map();
+
+function scanKeyPool() {
+  const pool = [];
+  if (GEMINI_API_KEY) pool.push(GEMINI_API_KEY);
+  for (const k of GEMINI_SEGMENT_API_KEYS) {
+    if (!pool.includes(k)) pool.push(k);
   }
+  return pool;
+}
+
+async function callGeminiScanWithModelFallback(primaryKey, body) {
+  const keys = [primaryKey, ...scanKeyPool().filter((k) => k !== primaryKey)];
+
+  let lastStatus = 503;
+  let lastData = { error: 'All Gemini keys/models are exhausted for today' };
+
+  for (const key of keys) {
+    for (const model of GEMINI_SCAN_MODELS) {
+      const comboId = `${key}|${model}`;
+      const exhaustedUntil = scanComboExhaustedUntil.get(comboId) || 0;
+      if (Date.now() < exhaustedUntil) {
+        continue;
+      }
+
+      const { status, data } = await callGeminiWithRetry(`${geminiModelUrl(model)}?key=${key}`, body, 1);
+      if (status >= 200 && status < 300) {
+        return { status, data };
+      }
+
+      lastStatus = status;
+      lastData = data;
+
+      if (isModelUnavailableError(status, data)) {
+        console.warn(`Model ${model} unavailable on this key, trying next model`);
+        continue;
+      }
+
+      if (status === 429) {
+        scanComboExhaustedUntil.set(comboId, Date.now() + 20 * 60 * 60 * 1000);
+        console.warn(`${model} hit its daily quota on this key, rotating`);
+        continue;
+      }
+
+      if (status === 503) {
+        console.warn(`${model} overloaded on this key, rotating`);
+        continue;
+      }
+
+      return { status, data };
+    }
+  }
+
   return { status: lastStatus, data: lastData };
 }
 
