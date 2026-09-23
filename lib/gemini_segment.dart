@@ -12,7 +12,7 @@ import 'constants.dart';
 
 const String _base = 'https://ridgeboticsapp.onrender.com';
 
-const int _maxPhotoSide = 1400;
+const int _maxPhotoSide = 1024;
 
 const int _maxMaskSide = 256;
 
@@ -69,7 +69,7 @@ Future<Map<int, SegMask>?> _segmentBatch(
       height: photo.height > photo.width ? _maxPhotoSide : null,
     );
   }
-  final photoJpeg = base64Encode(img.encodeJpg(working, quality: 90));
+  final photoJpeg = base64Encode(img.encodeJpg(working, quality: 78));
 
   final itemsDesc = StringBuffer();
   for (var i = 0; i < selected.length; i++) {
@@ -116,7 +116,7 @@ Future<Map<int, SegMask>?> _segmentBatch(
     ],
     'generationConfig': {
       'temperature': 0,
-      'maxOutputTokens': 16384,
+      'maxOutputTokens': 10240,
       'responseMimeType': 'application/json',
       'thinkingConfig': {'thinkingBudget': 0},
     },

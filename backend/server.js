@@ -946,7 +946,7 @@ async function callGeminiScanWithModelFallback(key, body) {
   let lastStatus = 404;
   let lastData = { error: 'No usable Gemini model for this key' };
   for (const model of GEMINI_SCAN_MODELS) {
-    const { status, data } = await callGeminiWithRetry(`${geminiModelUrl(model)}?key=${key}`, body, 2);
+    const { status, data } = await callGeminiWithRetry(`${geminiModelUrl(model)}?key=${key}`, body, 1);
     if (status >= 200 && status < 300) {
       return { status, data };
     }

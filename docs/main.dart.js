@@ -8688,8 +8688,8 @@ aK0(a,b,c){return A.bbU(a,b,c)},
 bbU(e6,e7,e8){var s=0,r=A.w(t.GQ),q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,c0,c1,c2,c3,c4,c5,c6,c7,c8,c9,d0,d1,d2,d3,d4,d5,d6,d7,d8,d9,e0,e1,e2,e3,e4,e5
 var $async$aK0=A.x(function(f0,f1){if(f0===1)return A.t(f1,r)
 for(;;)switch(s){case 0:e5=e6
-if(Math.max(e6.gcb(),e6.gaI())>1400){c5=e6.gcb()>=e6.gaI()?1400:null
-e5=A.aXi(e6,e6.gaI()>e6.gcb()?1400:null,B.jq,c5)}c5=e5
+if(Math.max(e6.gcb(),e6.gaI())>1024){c5=e6.gcb()>=e6.gaI()?1024:null
+e5=A.aXi(e6,e6.gaI()>e6.gcb()?1024:null,B.jq,c5)}c5=e5
 c6=new Uint8Array(64)
 c7=new Uint8Array(64)
 c8=new Float32Array(64)
@@ -8706,7 +8706,7 @@ c6.r=c6.BQ(B.t6,B.tf)
 c6.w=c6.BQ(B.tj,B.tv)
 c6.ao7()
 c6.aob()
-c6.a8F(90)
+c6.a8F(78)
 c5=c6.aAN(c5,B.rY)
 d4=B.fP.guF().eA(c5)
 for(c5=J.aR(e8),c6=t.t,d5=0,c7="";c8=e7.length,d5<c8;c7=d0){d6=c5.h(e8,e7[d5])
@@ -8718,7 +8718,7 @@ d0=c7+(""+d5+". Title: "+d6.a+"\n")+("   Description: "+d6.b+"\n")+("   Approxim
 c8=t.N
 c9=t.S
 d0=t.K
-d8=A.a5(["contents",A.b([A.a5(["parts",A.b([A.a5(["text","This is a photo of an FRC robot. Below is a numbered list of "+c6+" specific items already flagged on this robot, each with an approximate location. For EACH numbered item, give a tight segmentation mask of that exact item.\n\n"+(c7.charCodeAt(0)==0?c7:c7)+"\nRespond with a JSON array of exactly "+c6+' objects, in the same order as the numbered list above (the first object corresponds to item 1, the second to item 2, and so on). Each object must have "box_2d" as [ymin, xmin, ymax, xmax] normalized 0-1000 relative to the full photo, and "mask" as the standard segmentation mask image for that item. The mask must cover only the actual pixels of that specific item, not surrounding parts of the robot. If you cannot confidently locate a numbered item in the photo, still include its object in the array but set "box_2d" and "mask" to null. Do not skip or merge items; the array length must always equal '+c6+"."],c8,c8),A.a5(["inline_data",A.a5(["mime_type","image/jpeg","data",d4],c8,c8)],c8,t.GU)],t.Mq)],c8,t.JD)],t.lU),"generationConfig",A.a5(["temperature",0,"maxOutputTokens",16384,"responseMimeType","application/json","thinkingConfig",A.a5(["thinkingBudget",0],c8,c9)],c8,d0)],c8,d0)
+d8=A.a5(["contents",A.b([A.a5(["parts",A.b([A.a5(["text","This is a photo of an FRC robot. Below is a numbered list of "+c6+" specific items already flagged on this robot, each with an approximate location. For EACH numbered item, give a tight segmentation mask of that exact item.\n\n"+(c7.charCodeAt(0)==0?c7:c7)+"\nRespond with a JSON array of exactly "+c6+' objects, in the same order as the numbered list above (the first object corresponds to item 1, the second to item 2, and so on). Each object must have "box_2d" as [ymin, xmin, ymax, xmax] normalized 0-1000 relative to the full photo, and "mask" as the standard segmentation mask image for that item. The mask must cover only the actual pixels of that specific item, not surrounding parts of the robot. If you cannot confidently locate a numbered item in the photo, still include its object in the array but set "box_2d" and "mask" to null. Do not skip or merge items; the array length must always equal '+c6+"."],c8,c8),A.a5(["inline_data",A.a5(["mime_type","image/jpeg","data",d4],c8,c8)],c8,t.GU)],t.Mq)],c8,t.JD)],t.lU),"generationConfig",A.a5(["temperature",0,"maxOutputTokens",10240,"responseMimeType","application/json","thinkingConfig",A.a5(["thinkingBudget",0],c8,c9)],c8,d0)],c8,d0)
 d0=A.cn("https://ridgeboticsapp.onrender.com/segmentImage",0,null)
 c8=A.a5(["Content-Type","application/json"],c8,c8)
 s=3
