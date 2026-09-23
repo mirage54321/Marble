@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 
@@ -168,6 +169,7 @@ class AiService {
 
     if (response.statusCode != 200) {
       final errMsg = data['error']?.toString() ?? 'Unknown error';
+      debugPrint('[scan] non-200 (${response.statusCode}): $errMsg');
       if (_looksLikeQuotaError(errMsg)) {
         throw Exception('experiencing high demand');
       }
