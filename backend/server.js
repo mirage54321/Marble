@@ -78,12 +78,12 @@ function retryDelayMsFromResponse(response, attempt) {
   return GEMINI_BASE_DELAY_MS * Math.pow(2, attempt); 
 }
 
-async function callGeminiWithRetry(url, body) {
+async function callGeminiWithRetry(url, body, maxRetries = GEMINI_MAX_RETRIES) {
   await acquireGeminiSlot();
   try {
     let lastResponse;
     let lastData;
-    for (let attempt = 0; attempt < GEMINI_MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -98,12 +98,12 @@ async function callGeminiWithRetry(url, body) {
       lastResponse = response;
       lastData = data;
 
-      const isLastAttempt = attempt === GEMINI_MAX_RETRIES - 1;
+      const isLastAttempt = attempt === maxRetries - 1;
       if (isLastAttempt) break;
 
       const delay = retryDelayMsFromResponse(response, attempt);
       console.warn(
-        `Gemini ${response.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${GEMINI_MAX_RETRIES})`,
+        `Gemini ${response.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
       );
       await sleep(delay);
     }
@@ -946,7 +946,7 @@ async function callGeminiScanWithModelFallback(key, body) {
   let lastStatus = 404;
   let lastData = { error: 'No usable Gemini model for this key' };
   for (const model of GEMINI_SCAN_MODELS) {
-    const { status, data } = await callGeminiWithRetry(`${geminiModelUrl(model)}?key=${key}`, body);
+    const { status, data } = await callGeminiWithRetry(`${geminiModelUrl(model)}?key=${key}`, body, 2);
     if (status >= 200 && status < 300) {
       return { status, data };
     }

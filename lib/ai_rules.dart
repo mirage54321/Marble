@@ -103,7 +103,7 @@ class AiRulesService {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode(body),
         )
-        .timeout(const Duration(seconds: 60));
+        .timeout(const Duration(seconds: 110));
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
 

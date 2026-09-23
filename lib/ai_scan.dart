@@ -162,7 +162,7 @@ class AiService {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode(body),
         )
-        .timeout(const Duration(seconds: 60));
+        .timeout(const Duration(seconds: 110));
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
 
@@ -272,6 +272,17 @@ class AiService {
       'you cannot pin down a confident, accurate box for something, leave '
       'its "box_2d" out entirely rather than guessing one. Give each '
       'finding a short, specific title.\n\n'
+      'Give at least 3 findings unless the robot genuinely has nothing '
+      'worth checking anywhere. Look across multiple distinct areas of '
+      'the robot (wiring, fasteners, frame, belts/chains, battery '
+      'mounting, etc.) rather than stopping after the first couple of '
+      'things you notice. If an area you checked looks fine, include it '
+      'as its own finding with severity "ok" and a short note on what you '
+      'checked and confirmed looked fine there, naming the specific part '
+      '(not a generic filler item). Never invent a defect just to reach '
+      '3; use "ok" findings for genuinely fine areas instead. Only return '
+      'fewer than 3 findings if the robot has so little visible in the '
+      'photo that there truly is not more than that to comment on.\n\n'
       'Return an empty findings list ONLY when the photo is clear enough '
       'to inspect and you see nothing worth a closer look. If the image is '
       'too dark, blurry, obstructed, or too distant for a meaningful '
