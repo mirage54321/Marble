@@ -121,10 +121,19 @@ class _MyTeamTabState extends State<MyTeamTab> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(team.error!, style: TextStyle(color: Colors.grey[600]), textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: MatchColors.yellor),
+                onPressed: () => showTeamPrompt(context),
+                child: const Text('Put in a new team number'),
+              ),
+            ),
             const SizedBox(height: 12),
             TapCursor(
               onTap: controller.refreshEvents,
-              child: const Text('Try again', style: TextStyle(color: MatchColors.yellor, fontWeight: FontWeight.w500)),
+              child: const Text('Try again', style: TextStyle(color: MatchColors.yellorDark, fontWeight: FontWeight.w500)),
             ),
           ],
         ),
