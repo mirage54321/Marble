@@ -889,13 +889,101 @@ async function checkTeamAuth(req, res) {
   return team;
 }
 
-function fallbackRecommendation(batteries, reason = 'Most rested available battery') {
-  const available = batteries.find((battery) => !battery.isInUse && !battery.isCharging);
-  const picked = available || batteries[0];
+const BATTERY_CHARGE_MINUTES = 35;
+const BATTERY_COOLDOWN_MINUTES = 30;
+const BATTERY_EPOCH_MS = new Date('2000-01-01').getTime();
 
+function getBatteryState(battery, now = Date.now()) {
+  if (battery.isInUse) return { state: 'in_use' };
+
+  const lastUsed = battery.lastUsedAt ? new Date(battery.lastUsedAt).getTime() : 0;
+  const charged = battery.chargedAt ? new Date(battery.chargedAt).getTime() : null;
+  const hasBeenUsed = lastUsed > BATTERY_EPOCH_MS;
+
+  if (hasBeenUsed && (charged === null || lastUsed > charged)) {
+    const cooldownLeft = Math.ceil(BATTERY_COOLDOWN_MINUTES - (now - lastUsed) / 60000);
+    return cooldownLeft > 0
+      ? { state: 'dead_cooling_down', cooldownLeft }
+      : { state: 'dead_needs_charge' };
+  }
+
+  if (battery.isCharging) {
+    const elapsed = charged ? (now - charged) / 60000 : 0;
+    const chargeLeft = Math.ceil(BATTERY_CHARGE_MINUTES - elapsed);
+    return chargeLeft > 0
+      ? { state: 'charging', chargeLeft }
+      : { state: 'charged_ready' };
+  }
+
+  return { state: 'available' };
+}
+
+function formatAge(ms) {
+  const min = Math.max(0, Math.round(ms / 60000));
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h ${min % 60}m ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function flagSeverity(note) {
+  const t = String(note || '').toLowerCase();
+  if (!t.trim()) return 0.5;
+  const bad = /(\b0\s?v\b|\bdead\b|\bdied\b|\bdying\b|brown\s?-?out|\bbad+\b|\bweak\b|\blow\b|\bdrop|\bswoll|\bpuff|\bhot\b|\bsmok|\bcrack|\bdamag|\bfail|\bcut out|\bdies\b|\bpoor\b|\bterrible\b|\bworst\b)/;
+  const good = /(\bgreat\b|\bgood\b|\bsolid\b|\bstrong\b|\bperfect\b|\bbest\b|\breliable\b|\bfine\b|\bno issues?\b)/;
+  if (bad.test(t)) return 3;
+  if (good.test(t)) return -0.5;
+  return 1;
+}
+
+function batteryFlagScore(battery, now = Date.now()) {
+  const flags = Array.isArray(battery.flags) ? battery.flags : [];
+  return flags.reduce((sum, f) => {
+    const ageDays = Math.max(0, (now - new Date(f.flaggedAt).getTime()) / 86400000);
+    const recency = ageDays < 1 ? 1 : ageDays < 7 ? 0.6 : 0.3;
+    return sum + Math.max(0, flagSeverity(f.note)) * recency;
+  }, 0);
+}
+
+const STATE_RANK = { charged_ready: 0, available: 0, charging: 1 };
+
+function recommendableBatteries(batteries, now = Date.now()) {
+  return batteries
+    .map((battery) => ({ battery, info: getBatteryState(battery, now) }))
+    .filter(({ info }) => info.state in STATE_RANK);
+}
+
+function fallbackRecommendation(batteries, reason) {
+  const now = Date.now();
+  const candidates = recommendableBatteries(batteries, now);
+
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => {
+      const rank = STATE_RANK[a.info.state] - STATE_RANK[b.info.state];
+      if (rank !== 0) return rank;
+      const flags = batteryFlagScore(a.battery, now) - batteryFlagScore(b.battery, now);
+      if (flags !== 0) return flags;
+      if (a.info.state === 'charging') return a.info.chargeLeft - b.info.chargeLeft;
+      return (
+        new Date(a.battery.lastUsedAt).getTime() - new Date(b.battery.lastUsedAt).getTime()
+      );
+    });
+    return {
+      recommendedLabel: candidates[0].battery.label,
+      reason: reason || 'Charged and has the fewest recent problems',
+    };
+  }
+
+  const notInUse = batteries
+    .map((battery) => ({ battery, info: getBatteryState(battery, now) }))
+    .filter(({ info }) => info.state !== 'in_use');
+  const pick = notInUse[0];
   return {
-    recommendedLabel: picked ? picked.label : null,
-    reason: picked ? reason : 'No batteries logged yet',
+    recommendedLabel: pick ? pick.battery.label : batteries[0] ? batteries[0].label : null,
+    reason: batteries.length
+      ? 'Nothing is charged right now, charge one first'
+      : 'No batteries logged yet',
   };
 }
 
@@ -1421,55 +1509,74 @@ app.post('/battery/recommend', async (req, res) => {
       return res.json({ recommendedLabel: null, reason: 'No batteries logged yet' });
     }
 
+    const now = Date.now();
+    const candidates = recommendableBatteries(batteries, now);
+
+    if (candidates.length === 0) {
+      return res.json(fallbackRecommendation(batteries));
+    }
+
+    if (candidates.length === 1) {
+      return res.json({
+        recommendedLabel: candidates[0].battery.label,
+        reason: 'Only battery that is ready to use',
+      });
+    }
+
     if (!GEMINI_API_KEY) {
       return res.json(fallbackRecommendation(batteries));
     }
 
-    const chargeMinutes = 45;
-    const summary = batteries
-      .map((battery) => {
-        const restMinutes = Math.round(
-          (Date.now() - new Date(battery.lastUsedAt).getTime()) / 60000,
-        );
+    const summary = candidates
+      .map(({ battery, info }) => {
+        const status =
+          info.state === 'charging'
+            ? `still charging (${info.chargeLeft} min left)`
+            : info.state === 'charged_ready'
+              ? 'fully charged and ready'
+              : 'available';
 
-        const chargingStatus = battery.isInUse
-          ? 'currently in use'
-          : battery.isCharging
-            ? (() => {
-                const chargedAt = battery.chargedAt
-                  ? new Date(battery.chargedAt).getTime()
-                  : Date.now();
-                const elapsedMin = Math.round((Date.now() - chargedAt) / 60000);
-                const remaining = Math.max(0, chargeMinutes - elapsedMin);
-                return remaining > 0 ? `charging (${remaining}min left)` : 'charging (ready)';
-              })()
-            : 'available';
+        const lastUsed = new Date(battery.lastUsedAt).getTime();
+        const lastUsedText =
+          lastUsed > BATTERY_EPOCH_MS ? `last used ${formatAge(now - lastUsed)}` : 'never used yet';
 
         const flags = Array.isArray(battery.flags) ? battery.flags : [];
-        const flagSummary =
+        const recentFlags = flags.slice(-15).reverse();
+        const flagText =
           flags.length === 0
             ? 'no flags'
-            : `flagged ${flags.length}x, reasons: ${flags
-                .map((flag) => flag.note || 'no reason given')
-                .join('; ')}`;
+            : `${flags.length} flag(s) total. Notes, newest first:\n` +
+              recentFlags
+                .map(
+                  (f) =>
+                    `    - "${(f.note || 'no reason given').slice(0, 200)}" (${formatAge(
+                      now - new Date(f.flaggedAt).getTime(),
+                    )})`,
+                )
+                .join('\n');
 
-        return `${battery.label}: charged ${restMinutes} minutes ago, status: ${chargingStatus}, ${flagSummary}`;
+        return `${battery.label}: ${status}, ${lastUsedText}, ${flagText}`;
       })
-      .join('\n');
+      .join('\n\n');
+
+    const prompt =
+      `You are helping an FRC robotics team pick which battery to grab for their next match.\n\n` +
+      `Here are the batteries that are available right now:\n\n${summary}\n\n` +
+      `Rules:\n` +
+      `- A "flag" is just a note someone left about a battery. Flags can be POSITIVE ("great battery") or NEGATIVE ("0v", "died after auto", "SO BAD", "brownout"). ` +
+      `Read what each note actually says. NEVER judge by the number of flags.\n` +
+      `- Ignore positive or neutral notes when looking for problems. Treat notes about low or 0 voltage, dying mid-match, brownouts, swelling, or overheating as serious.\n` +
+      `- Recent notes matter more than old ones. One serious recent problem outweighs many old or positive notes.\n` +
+      `- Strongly prefer fully charged/available batteries over ones still charging.\n` +
+      `- If batteries are otherwise equal, prefer the one used least recently so use is spread evenly.\n\n` +
+      `Respond ONLY with valid JSON, no markdown, and recommendedLabel must be one of the labels above:\n` +
+      `{"recommendedLabel":"B1","reason":"one sentence under 15 words, mention the note that mattered if any"}`;
 
     const { status, data } = await callGeminiWithRetry(
       `${GEMINI_TEXT_URL}?key=${GEMINI_API_KEY}`,
       {
-        contents: [
-          {
-            parts: [
-              {
-                text: `Here is battery data for an FRC robotics team preparing for a match:\n\n${summary}\n\nBased on this, which single battery should they grab next? Prefer available batteries that were charged longest ago (most rested). Avoid batteries currently in use or still charging. Heavily penalize batteries with flags mentioning serious issues like dying mid-match or brownouts. Respond ONLY with valid JSON, no markdown:\n\n{"recommendedLabel":"B1","reason":"one sentence reason under 15 words"}`,
-              },
-            ],
-          },
-        ],
-        generationConfig: { temperature: 0, maxOutputTokens: 100 },
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 150 },
       },
     );
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text
@@ -1483,8 +1590,12 @@ app.post('/battery/recommend', async (req, res) => {
 
     try {
       const parsed = JSON.parse(rawText);
+      const valid = candidates.some(({ battery }) => battery.label === parsed.recommendedLabel);
+      if (!valid) {
+        return res.json(fallbackRecommendation(batteries));
+      }
       return res.json({
-        recommendedLabel: parsed.recommendedLabel || null,
+        recommendedLabel: parsed.recommendedLabel,
         reason: parsed.reason || 'Recommended by battery history',
       });
     } catch (parseErr) {

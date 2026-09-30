@@ -29,6 +29,7 @@ class _BatteryLoginScreenState extends State<BatteryLoginScreen>
   final _guestTeamCtrl = TextEditingController();
 
   bool _loading = false;
+  bool _checkingSession = true;
   String? _loginError;
   String? _regError;
   String? _guestError;
@@ -39,6 +40,26 @@ class _BatteryLoginScreenState extends State<BatteryLoginScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _restoreSession();
+  }
+
+  Future<void> _restoreSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final team = prefs.getString('battery_team');
+      final pass = prefs.getString('battery_passcode');
+      final guest = prefs.getBool('battery_guest') ?? false;
+      if (team != null && team.isNotEmpty && (guest || pass != null)) {
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const BatteryScreen()),
+        );
+        return;
+      }
+    } catch (_) {
+    }
+    if (mounted) setState(() => _checkingSession = false);
   }
 
   @override
@@ -220,6 +241,12 @@ class _BatteryLoginScreenState extends State<BatteryLoginScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (_checkingSession) {
+      return const Scaffold(
+        backgroundColor: Color.fromARGB(255, 255, 255, 248),
+        body: Center(child: CircularProgressIndicator(color: Yellor)),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 255, 255, 248),
       body: SafeArea(

@@ -15,8 +15,11 @@ const YellorDark = Color(0xFFB38600);
 const greenChar = Color(0xFF4CAF50);
 const redChar = Color(0xFFD93025);
 
-const int kChargeMinutes = 45;
+const int kChargeMinutes = 35;
+const int kCooldownMinutes = 30;
+const int kPollSeconds = 3;
 const grayChar = Color(0xFFAAAAAA);
+const deadChar = Color(0xFF616161);
 
 class _LabelKey implements Comparable<_LabelKey> {
   final int? number;
@@ -95,8 +98,8 @@ class PendingBatteryAction {
 
 class Battery {
   final String label;
-  final DateTime lastUsedAt;
-  final DateTime? chargedAt;
+  DateTime lastUsedAt;
+  DateTime? chargedAt;
   final List<FlagEntry> flags;
   bool isCharging;
   bool isInUse;
@@ -139,6 +142,25 @@ class Battery {
     final remaining = chargeTimeRemaining;
     return isCharging && remaining != null && remaining == Duration.zero;
   }
+
+  bool get hasBeenUsed => lastUsedAt.isAfter(DateTime(2000));
+
+  bool get isDead {
+    if (isInUse || !hasBeenUsed) return false;
+    return chargedAt == null || lastUsedAt.isAfter(chargedAt!);
+  }
+
+  Duration? get cooldownRemaining {
+    if (!isDead) return null;
+    final remaining = Duration(minutes: kCooldownMinutes) -
+        DateTime.now().difference(lastUsedAt);
+    return remaining > Duration.zero ? remaining : null;
+  }
+
+  bool get isCoolingDown => cooldownRemaining != null;
+
+  DateTime? get fullyChargedAt =>
+      chargedAt?.add(Duration(minutes: kChargeMinutes));
 }
 
 class BatteryScreen extends StatefulWidget {
@@ -148,7 +170,8 @@ class BatteryScreen extends StatefulWidget {
   State<BatteryScreen> createState() => _BatteryScreenState();
 }
 
-class _BatteryScreenState extends State<BatteryScreen> {
+class _BatteryScreenState extends State<BatteryScreen>
+    with WidgetsBindingObserver {
   static const String _base = 'https://ridgeboticsapp.onrender.com';
 
   List<Battery> _batteries = [];
@@ -167,10 +190,17 @@ class _BatteryScreenState extends State<BatteryScreen> {
   bool _syncing = false;
 
   Timer? _ticker;
+  Timer? _poller;
+
+  int _mutations = 0;
+  int _inFlight = 0;
+  bool _polling = false;
+  String? _lastRawJson;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _init();
     _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
@@ -183,8 +213,42 @@ class _BatteryScreenState extends State<BatteryScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
+    _poller?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (teamNum != null) {
+        unawaited(_poll());
+        _startPolling();
+      }
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _poller?.cancel();
+    }
+  }
+
+  void _startPolling() {
+    _poller?.cancel();
+    _poller = Timer.periodic(
+      const Duration(seconds: kPollSeconds),
+      (_) => _poll(),
+    );
+  }
+
+  Future<void> _poll() async {
+    if (!mounted || _polling || _isLoading || teamNum == null) return;
+    if (_inFlight > 0 || _pending.isNotEmpty) return;
+    _polling = true;
+    try {
+      await _loadBatteries(silent: true);
+    } finally {
+      _polling = false;
+    }
   }
 
   Future<void> _init() async {
@@ -207,6 +271,7 @@ class _BatteryScreenState extends State<BatteryScreen> {
     teamName = savedTeamName;
     await _loadPending();
     await _loadBatteries();
+    if (mounted) _startPolling();
   }
 
   Future<void> _loadBatteries({bool silent = false}) async {
@@ -217,6 +282,7 @@ class _BatteryScreenState extends State<BatteryScreen> {
       });
     }
 
+    final startMutations = _mutations;
     try {
       final uri = _isGuest
           ? Uri.parse('$_base/battery/list?teamNumber=$teamNum&guest=true')
@@ -226,6 +292,7 @@ class _BatteryScreenState extends State<BatteryScreen> {
 
       if (res.statusCode == 401) { await _logout(); return; }
       if (res.statusCode == 404) {
+        if (silent) return;
         setState(() { _error = 'Team not found'; _isLoading = false; });
         return;
       }
@@ -242,7 +309,14 @@ class _BatteryScreenState extends State<BatteryScreen> {
       }
 
       final rawList = data['batteries'] as List<dynamic>? ?? [];
-      await _cacheBatteriesRaw(rawList);
+
+      if (silent && startMutations != _mutations) return;
+
+      final encoded = jsonEncode(rawList);
+      if (encoded != _lastRawJson) {
+        _lastRawJson = encoded;
+        await _cacheBatteriesRaw(rawList);
+      }
       final loaded = rawList
           .map((b) => Battery.fromJson(b as Map<String, dynamic>))
           .toList();
@@ -252,12 +326,15 @@ class _BatteryScreenState extends State<BatteryScreen> {
         _batteries = loaded;
         _isLoading = false;
         _error = null;
-        _recommendedLabel = null;
-        _recommendReason = null;
+        if (!silent) {
+          _recommendedLabel = null;
+          _recommendReason = null;
+        }
       });
 
       unawaited(_syncPending());
     } catch (e) {
+      if (silent) return;
 
       final cached = await _readCachedBatteries();
       if (cached != null && cached.isNotEmpty) {
@@ -395,6 +472,7 @@ class _BatteryScreenState extends State<BatteryScreen> {
 
 
   Future<void> _dispatchAction(PendingBatteryAction action) async {
+    _mutations++;
 
     if (action.type == 'use' || action.type == 'charging') {
       final existingIndex = _pending.indexWhere(
@@ -407,7 +485,13 @@ class _BatteryScreenState extends State<BatteryScreen> {
       }
     }
 
-    final ok = await _sendAction(action);
+    _inFlight++;
+    final bool ok;
+    try {
+      ok = await _sendAction(action);
+    } finally {
+      _inFlight--;
+    }
     if (ok) {
       unawaited(_loadBatteries(silent: true));
       return;
@@ -445,6 +529,7 @@ class _BatteryScreenState extends State<BatteryScreen> {
 
   Future<void> _logout() async {
     _ticker?.cancel();
+    _poller?.cancel();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('battery_team');
     await prefs.remove('battery_passcode');
@@ -457,7 +542,10 @@ class _BatteryScreenState extends State<BatteryScreen> {
 
   Future<void> _toggleInUse(Battery battery) async {
     if (_isGuest) return;
-    setState(() => battery.isInUse = !battery.isInUse);
+    setState(() {
+      battery.isInUse = !battery.isInUse;
+      battery.lastUsedAt = DateTime.now();
+    });
     await _dispatchAction(PendingBatteryAction(
       id: '${DateTime.now().microsecondsSinceEpoch}',
       type: 'use',
@@ -468,7 +556,33 @@ class _BatteryScreenState extends State<BatteryScreen> {
 
   Future<void> _toggleCharging(Battery battery) async {
     if (_isGuest) return;
-    setState(() => battery.isCharging = !battery.isCharging);
+
+    if (battery.isCoolingDown && !battery.isCharging) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Still cooling down'),
+          content: Text(
+              '${battery.label} was just used. Give it '
+              '${_fmtCeilMinutes(battery.cooldownRemaining ?? Duration.zero)} more to cool '
+              'before charging. Charge anyway?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Wait')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Charge anyway')),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+    }
+
+    setState(() {
+      battery.isCharging = !battery.isCharging;
+      if (battery.isCharging) battery.chargedAt = DateTime.now();
+    });
     await _dispatchAction(PendingBatteryAction(
       id: '${DateTime.now().microsecondsSinceEpoch}',
       type: 'charging',
@@ -755,8 +869,18 @@ class _BatteryScreenState extends State<BatteryScreen> {
     );
   }
 
+  String _fmtCeilMinutes(Duration d) {
+    final m = (d.inSeconds / 60).ceil();
+    return '${m < 1 ? 1 : m}m';
+  }
+
   String _statusLabel(Battery b) {
     if (b.isInUse) return 'IN USE';
+    if (b.isDead) {
+      final cd = b.cooldownRemaining;
+      if (cd != null) return 'DEAD · COOLING DOWN ${_fmtCeilMinutes(cd)}';
+      return 'DEAD · READY TO CHARGE';
+    }
     if (b.isCharging) {
       final rem = b.chargeTimeRemaining;
       if (rem == null || rem == Duration.zero) return 'READY';
@@ -770,6 +894,7 @@ class _BatteryScreenState extends State<BatteryScreen> {
 
   Color _statusColor(Battery b) {
     if (b.isInUse) return redChar;
+    if (b.isDead) return b.isCoolingDown ? Colors.blueGrey : deadChar;
     if (b.isCharging) {
       return b.isChargingComplete ? greenChar : Colors.orange;
     }
@@ -784,16 +909,36 @@ class _BatteryScreenState extends State<BatteryScreen> {
   }
 
   String _chargedLabel(Battery b) {
-    if (b.chargedAt == null && b.lastUsedAt.isBefore(DateTime(2000))) return 'Just added';
-    final since = b.timeSinceCharged;
-    return 'Charged ${_timeAgo(since)}';
+    if (b.isInUse) {
+      return 'Started ${_timeAgo(DateTime.now().difference(b.lastUsedAt))}';
+    }
+    if (b.isDead) {
+      return 'Used ${_timeAgo(DateTime.now().difference(b.lastUsedAt))}, needs a charge';
+    }
+    if (b.chargedAt == null && !b.hasBeenUsed) return 'Just added';
+    if (b.isCharging) {
+      final done = b.fullyChargedAt;
+      if (done != null && !done.isAfter(DateTime.now())) {
+        return 'Fully charged ${_timeAgo(DateTime.now().difference(done))}';
+      }
+      return 'Charging started ${_timeAgo(DateTime.now().difference(b.chargedAt!))}';
+    }
+    return 'Charged ${_timeAgo(b.timeSinceCharged)}';
   }
 
   Battery _localRecommended() {
-    return _batteries.firstWhere(
-      (b) => !b.isCharging && !b.isInUse,
-      orElse: () => _batteries.first,
-    );
+    for (final b in _batteries) {
+      if (!b.isInUse && !b.isDead && (!b.isCharging || b.isChargingComplete)) {
+        return b;
+      }
+    }
+    final charging = _batteries
+        .where((b) => !b.isInUse && !b.isDead && b.isCharging)
+        .toList()
+      ..sort((a, b) => (a.chargeTimeRemaining ?? Duration.zero)
+          .compareTo(b.chargeTimeRemaining ?? Duration.zero));
+    if (charging.isNotEmpty) return charging.first;
+    return _batteries.first;
   }
 
   @override
@@ -1040,11 +1185,11 @@ class _BatteryScreenState extends State<BatteryScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(
-                      color: battery.isCharging ? greenChar : Colors.white,
+                      color: (battery.isCharging && !battery.isDead) ? greenChar : Colors.white,
                       borderRadius: BorderRadius.circular(12)),
-                  child: Text(battery.isCharging ? 'Charging' : 'Mark charging',
+                  child: Text((battery.isCharging && !battery.isDead) ? 'Charging' : 'Mark charging',
                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
-                          color: battery.isCharging ? Colors.white : YellorDark)),
+                          color: (battery.isCharging && !battery.isDead) ? Colors.white : YellorDark)),
                 ),
               ),
               const SizedBox(height: 8),
@@ -1103,11 +1248,19 @@ class _BatteryScreenState extends State<BatteryScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                  color: battery.isCharging ? greenChar : YellorLight,
+                  color: (battery.isCharging && !battery.isDead)
+                      ? greenChar
+                      : battery.isCoolingDown
+                          ? Colors.blueGrey.withValues(alpha: 0.15)
+                          : YellorLight,
                   borderRadius: BorderRadius.circular(10)),
-              child: Text(battery.isCharging ? 'Charging' : 'Charge',
+              child: Text((battery.isCharging && !battery.isDead) ? 'Charging' : 'Charge',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
-                      color: battery.isCharging ? Colors.white : YellorDark)),
+                      color: (battery.isCharging && !battery.isDead)
+                          ? Colors.white
+                          : battery.isCoolingDown
+                              ? Colors.blueGrey
+                              : YellorDark)),
             ),
           ),
           const SizedBox(width: 6),
