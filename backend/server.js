@@ -322,12 +322,18 @@ function notificationForStage(teamNumber, label, stage, extra = {}) {
   }
 }
 
-const FAKE_TEAM_NUMBER = '-4388';
-const FAKE_TEAM_KEY = `frc${FAKE_TEAM_NUMBER}`;
 const FAKE_EVENT_KEY = 'faketest2026';
 
+const FAKE_ACCESS_TEAMS = new Set(
+  (process.env.FAKE_EVENT_TEAMS || '4414')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean),
+);
+
 function isFakeTeamNumber(teamNumber) {
-  return cleanString(teamNumber) === FAKE_TEAM_NUMBER;
+  const cleaned = cleanString(teamNumber);
+  return cleaned !== null && FAKE_ACCESS_TEAMS.has(cleaned);
 }
 
 const FAKE_DATE_TO_DAY_OFFSET = {
@@ -336,7 +342,7 @@ const FAKE_DATE_TO_DAY_OFFSET = {
   '2026-08-26': 2,
 };
 
-const FAKE_FIXED_ANCHOR = new Date(Date.UTC(2026, 8, 7)); // 2026-09-07; = offset 0 (practice)
+const FAKE_FIXED_ANCHOR = new Date(Date.UTC(2026, 8, 7));
 
 function fakeResolvedDate(oldDateStr) {
   const offset = FAKE_DATE_TO_DAY_OFFSET[oldDateStr];
@@ -348,7 +354,7 @@ function fakeResolvedDate(oldDateStr) {
 function fakeEvent() {
   return {
     key: FAKE_EVENT_KEY,
-    name: 'Marble Test Event \u2014 Pikes Peak Regional replay (fake, team -4388 only)',
+    name: 'Marble Test Event \u2014 competition replay (fake, no scores)',
     start_date: fakeResolvedDate('2026-08-24'),
     end_date: fakeResolvedDate('2026-08-26'),
     city: 'Colorado Springs',
@@ -376,172 +382,172 @@ function fakeMstEpochSeconds(dateStr, hour, minute) {
   return Math.floor(Date.UTC(y, m - 1, d, hour, minute) / 1000) - offsetHours * 3600;
 }
 
-const FAKE_PRACTICE_SCHEDULE = [
-  { num: 1, date: '2026-08-24', hour: 9, minute: 4, red: ['2945', '10333', '8044'], blue: ['1339', '662', '3807'] },
-  { num: 2, date: '2026-08-24', hour: 9, minute: 19, red: ['2996', '4418', '1619'], blue: ['2240', '6358', '10114'] },
-  { num: 3, date: '2026-08-24', hour: 9, minute: 31, red: ['4293', '1339', '9501'], blue: ['3648', '1977', '4499'] },
-  { num: 4, date: '2026-08-24', hour: 9, minute: 42, red: ['4944', '8044', '2083'], blue: ['159', '4183', '9068'] },
-  { num: 5, date: '2026-08-24', hour: 9, minute: 52, red: ['5493', '4499', '9134'], blue: ['9586', '7485', '-4388'] },
-  { num: 6, date: '2026-08-24', hour: 10, minute: 4, red: ['4068', '4293', '1619'], blue: ['8044', '2240', '1977'] },
-  { num: 7, date: '2026-08-24', hour: 10, minute: 16, red: ['498', '8334', '4499'], blue: ['11220', '2996', '159'] },
-  { num: 8, date: '2026-08-24', hour: 10, minute: 27, red: ['7485', '9501', '4293'], blue: ['3807', '9586', '4550'] },
-  { num: 9, date: '2026-08-24', hour: 10, minute: 39, red: ['662', '4499', '3648'], blue: ['498', '5493', '2996'] },
-  { num: 10, date: '2026-08-24', hour: 10, minute: 50, red: ['-4388', '9068', '8044'], blue: ['2240', '4183', '4293'] },
-  { num: 11, date: '2026-08-24', hour: 11, minute: 1, red: ['2945', '2083', '6358'], blue: ['4499', '10114', '4068'] },
-  { num: 12, date: '2026-08-24', hour: 11, minute: 13, red: ['8334', '9586', '2996'], blue: ['4293', '2945', '4944'] },
-  { num: 13, date: '2026-08-24', hour: 11, minute: 24, red: ['1977', '10333', '159'], blue: ['4293', '2945', '1619'] },
-  { num: 14, date: '2026-08-24', hour: 11, minute: 36, red: ['498', '3648', '1339'], blue: ['1619', '2996', '4499'] },
-  { num: 15, date: '2026-08-24', hour: 11, minute: 47, red: ['9586', '11220', '9501'], blue: ['2083', '9134', '662'] },
-  { num: 16, date: '2026-08-24', hour: 11, minute: 57, red: ['10114', '4293', '1619'], blue: ['4550', '4068', '5493'] },
-  { num: 17, date: '2026-08-24', hour: 12, minute: 6, red: ['6358', '498', '4499'], blue: ['9068', '3807', '2240'] },
-  { num: 18, date: '2026-08-24', hour: 12, minute: 19, red: ['4944', '9134', '2945'], blue: ['9501', '1619', '4293'] },
-  { num: 19, date: '2026-08-24', hour: 12, minute: 31, red: ['-4388', '2240', '10114'], blue: ['8044', '3648', '2996'] },
-  { num: 20, date: '2026-08-24', hour: 12, minute: 41, red: ['3288', '1339', '7485'], blue: ['2083', '498', '1977'] },
-  { num: 21, date: '2026-08-24', hour: 12, minute: 52, red: ['662', '159', '9586'], blue: ['-4388', '4068', '9068'] },
-  { num: 22, date: '2026-08-24', hour: 13, minute: 4, red: ['3807', '4418', '5493'], blue: ['6358', '8334', '4183'] },
-  { num: 23, date: '2026-08-24', hour: 13, minute: 12, red: ['10114', '2240', '4944'], blue: ['6358', '-4388', '498'] },
-  { num: 24, date: '2026-08-24', hour: 13, minute: 22, red: ['9068', '7485', '11220'], blue: ['3648', '9501', '498'] },
-  { num: 25, date: '2026-08-24', hour: 13, minute: 31, red: ['4499', '8044', '2083'], blue: ['2240', '4293', '4418'] },
-  { num: 26, date: '2026-08-24', hour: 13, minute: 41, red: ['159', '4944', '8334'], blue: ['9586', '1339', '6358'] },
-  { num: 27, date: '2026-08-24', hour: 13, minute: 53, red: ['4183', '1977', '4550'], blue: ['2996', '662', '2240'] },
-  { num: 28, date: '2026-08-24', hour: 14, minute: 9, red: ['1619', '4499', '498'], blue: ['5493', '2083', '-4388'] },
-  { num: 29, date: '2026-08-24', hour: 14, minute: 20, red: ['4068', '6358', '4293'], blue: ['9501', '3288', '9134'] },
-  { num: 30, date: '2026-08-24', hour: 14, minute: 29, red: ['2240', '9068', '4499'], blue: ['1339', '4944', '2996'] },
-  { num: 31, date: '2026-08-24', hour: 14, minute: 40, red: ['2240', '11220', '4293'], blue: ['4183', '4068', '7485'] },
-  { num: 32, date: '2026-08-24', hour: 14, minute: 50, red: ['10333', '9068', '9586'], blue: ['1977', '5493', '10114'] },
-  { num: 33, date: '2026-08-24', hour: 15, minute: 0, red: ['8044', '4499', '498'], blue: ['4550', '1619', '662'] },
-];
- 
-
-const FAKE_QUALS_SCHEDULE = [
-  { num: 1, date: '2026-08-25', hour: 8, minute: 53, red: ['3648', '2996', '9134'], blue: ['8334', '10114', '662'], redScore: 223, blueScore: 75 },
-  { num: 2, date: '2026-08-25', hour: 9, minute: 5, red: ['4293', '3807', '9586'], blue: ['4068', '1977', '4944'], redScore: 70, blueScore: 120 },
-  { num: 3, date: '2026-08-25', hour: 9, minute: 18, red: ['2945', '9501', '4183'], blue: ['10333', '4499', '3288'], redScore: 30, blueScore: 230 },
-  { num: 4, date: '2026-08-25', hour: 9, minute: 27, red: ['9068', '-4388', '2240'], blue: ['1339', '4550', '4418'], redScore: 412, blueScore: 100 },
-  { num: 5, date: '2026-08-25', hour: 9, minute: 36, red: ['498', '2083', '8044'], blue: ['5493', '159', '1619'], redScore: 299, blueScore: 42 },
-  { num: 6, date: '2026-08-25', hour: 9, minute: 48, red: ['6358', '11220', '2996'], blue: ['7485', '4068', '8334'], redScore: 212, blueScore: 144 },
-  { num: 7, date: '2026-08-25', hour: 9, minute: 58, red: ['4418', '9501', '4499'], blue: ['10114', '3807', '4944'], redScore: 253, blueScore: 77 },
-  { num: 8, date: '2026-08-25', hour: 10, minute: 7, red: ['4183', '662', '4550'], blue: ['4293', '1339', '5493'], redScore: 54, blueScore: 187 },
-  { num: 9, date: '2026-08-25', hour: 10, minute: 16, red: ['3648', '11220', '3288'], blue: ['1977', '498', '9068'], redScore: 33, blueScore: 549 },
-  { num: 10, date: '2026-08-25', hour: 10, minute: 24, red: ['159', '2240', '6358'], blue: ['1619', '2945', '8044'], redScore: 196, blueScore: 242 },
-  { num: 11, date: '2026-08-25', hour: 10, minute: 34, red: ['2083', '9586', '-4388'], blue: ['7485', '9134', '10333'], redScore: 148, blueScore: 42 },
-  { num: 12, date: '2026-08-25', hour: 10, minute: 48, red: ['5493', '4183', '4499'], blue: ['2996', '4068', '3807'], redScore: 199, blueScore: 216 },
-  { num: 13, date: '2026-08-25', hour: 10, minute: 58, red: ['9068', '9501', '10114'], blue: ['2240', '4550', '3288'], redScore: 221, blueScore: 127 },
-  { num: 14, date: '2026-08-25', hour: 11, minute: 9, red: ['4418', '8044', '159'], blue: ['-4388', '662', '7485'], redScore: 181, blueScore: 98 },
-  { num: 15, date: '2026-08-25', hour: 11, minute: 18, red: ['2083', '9134', '1619'], blue: ['3648', '1977', '2945'], redScore: 238, blueScore: 59 },
-  { num: 16, date: '2026-08-25', hour: 11, minute: 27, red: ['10333', '1339', '6358'], blue: ['498', '4293', '11220'], redScore: 143, blueScore: 210 },
-  { num: 17, date: '2026-08-25', hour: 11, minute: 36, red: ['9586', '4944', '2240'], blue: ['8334', '3288', '2996'], redScore: 107, blueScore: 164 },
-  { num: 18, date: '2026-08-25', hour: 11, minute: 45, red: ['1619', '1977', '-4388'], blue: ['662', '4068', '9501'], redScore: 249, blueScore: 133 },
-  { num: 19, date: '2026-08-25', hour: 11, minute: 55, red: ['5493', '8044', '10333'], blue: ['159', '3807', '9068'], redScore: 243, blueScore: 259 },
-  { num: 20, date: '2026-08-25', hour: 12, minute: 5, red: ['2083', '4418', '3648'], blue: ['11220', '9586', '1339'], redScore: 47, blueScore: 166 },
-  { num: 21, date: '2026-08-26', hour: 8, minute: 53, red: ['4293', '4944', '7485'], blue: ['2945', '4499', '9134'], redScore: 139, blueScore: 171 },
-  { num: 22, date: '2026-08-25', hour: 13, minute: 16, red: ['8334', '6358', '4183'], blue: ['4550', '10114', '498'], redScore: 66, blueScore: 326 },
-  { num: 23, date: '2026-08-25', hour: 13, minute: 27, red: ['11220', '3807', '5493'], blue: ['3648', '-4388', '8044'], redScore: 22, blueScore: 245 },
-  { num: 24, date: '2026-08-25', hour: 13, minute: 36, red: ['3288', '1339', '662'], blue: ['4499', '4293', '1619'], redScore: 145, blueScore: 334 },
-  { num: 25, date: '2026-08-25', hour: 13, minute: 45, red: ['9134', '4550', '9586'], blue: ['7485', '159', '498'], redScore: 76, blueScore: 333 },
-  { num: 26, date: '2026-08-25', hour: 13, minute: 55, red: ['1977', '8334', '10333'], blue: ['6358', '4418', '4944'], redScore: 53, blueScore: 64 },
-  { num: 27, date: '2026-08-25', hour: 14, minute: 4, red: ['4183', '4068', '10114'], blue: ['2083', '2240', '2945'], redScore: 92, blueScore: 49 },
-  { num: 28, date: '2026-08-25', hour: 14, minute: 14, red: ['9068', '2996', '4293'], blue: ['8044', '9134', '9501'], redScore: 405, blueScore: 306 },
-  { num: 29, date: '2026-08-25', hour: 14, minute: 24, red: ['11220', '4499', '4550'], blue: ['1977', '3288', '4418'], redScore: 158, blueScore: 27 },
-  { num: 30, date: '2026-08-25', hour: 14, minute: 33, red: ['-4388', '8334', '4944'], blue: ['159', '2083', '4183'], redScore: 190, blueScore: 76 },
-  { num: 31, date: '2026-08-25', hour: 14, minute: 43, red: ['9501', '7485', '3807'], blue: ['2240', '3648', '1339'], redScore: 48, blueScore: 296 },
-  { num: 32, date: '2026-08-25', hour: 14, minute: 53, red: ['2996', '498', '1619'], blue: ['6358', '10114', '5493'], redScore: 493, blueScore: 79 },
-  { num: 33, date: '2026-08-25', hour: 15, minute: 3, red: ['2945', '10333', '662'], blue: ['4068', '9068', '9586'], redScore: 31, blueScore: 279 },
-  { num: 34, date: '2026-08-25', hour: 15, minute: 14, red: ['3807', '4183', '4418'], blue: ['9501', '3288', '2083'], redScore: 66, blueScore: 53 },
-  { num: 35, date: '2026-08-25', hour: 15, minute: 23, red: ['8044', '11220', '1977'], blue: ['2240', '4499', '10114'], redScore: 210, blueScore: 337 },
-  { num: 36, date: '2026-08-25', hour: 15, minute: 32, red: ['4944', '5493', '498'], blue: ['9068', '8334', '3648'], redScore: 433, blueScore: 261 },
-  { num: 37, date: '2026-08-25', hour: 15, minute: 46, red: ['1619', '662', '9586'], blue: ['4550', '10333', '-4388'], redScore: 83, blueScore: 134 },
-  { num: 38, date: '2026-08-25', hour: 15, minute: 54, red: ['1339', '2996', '159'], blue: ['6358', '4293', '2945'], redScore: 216, blueScore: 84 },
-  { num: 39, date: '2026-08-25', hour: 16, minute: 2, red: ['9134', '5493', '4068'], blue: ['4418', '7485', '11220'], redScore: 193, blueScore: 64 },
-  { num: 40, date: '2026-08-25', hour: 16, minute: 11, red: ['3288', '4944', '2083'], blue: ['662', '8044', '3807'], redScore: 161, blueScore: 254 },
-  { num: 41, date: '2026-08-25', hour: 16, minute: 19, red: ['159', '2945', '8334'], blue: ['4550', '9501', '1977'], redScore: 87, blueScore: 111 },
-  { num: 42, date: '2026-08-25', hour: 16, minute: 31, red: ['10114', '1339', '9134'], blue: ['4499', '-4388', '4068'], redScore: 143, blueScore: 234 },
-  { num: 43, date: '2026-08-25', hour: 16, minute: 40, red: ['2240', '10333', '4293'], blue: ['498', '3648', '6358'], redScore: 234, blueScore: 261 },
-  { num: 44, date: '2026-08-25', hour: 16, minute: 50, red: ['9586', '7485', '2996'], blue: ['4183', '1619', '9068'], redScore: 142, blueScore: 241 },
-  { num: 45, date: '2026-08-25', hour: 17, minute: 0, red: ['3807', '2945', '4550'], blue: ['8334', '5493', '4418'], redScore: 27, blueScore: 37 },
-  { num: 46, date: '2026-08-25', hour: 17, minute: 10, red: ['1977', '6358', '9134'], blue: ['1339', '-4388', '9501'], redScore: 152, blueScore: 220 },
-  { num: 47, date: '2026-08-25', hour: 17, minute: 19, red: ['4499', '159', '3648'], blue: ['4183', '2240', '7485'], redScore: 215, blueScore: 118 },
-  { num: 48, date: '2026-08-25', hour: 17, minute: 29, red: ['10114', '4293', '2083'], blue: ['11220', '9068', '662'], redScore: 103, blueScore: 305 },
-  { num: 49, date: '2026-08-26', hour: 9, minute: 1, red: ['3288', '8044', '4068'], blue: ['10333', '9586', '498'], redScore: 305, blueScore: 194 },
-  { num: 50, date: '2026-08-26', hour: 9, minute: 19, red: ['2996', '4944', '4499'], blue: ['1619', '6358', '4550'], redScore: 221, blueScore: 95 },
-  { num: 51, date: '2026-08-26', hour: 9, minute: 29, red: ['4293', '4418', '-4388'], blue: ['9501', '3648', '5493'], redScore: 91, blueScore: 72 },
-  { num: 52, date: '2026-08-26', hour: 9, minute: 38, red: ['498', '2240', '3807'], blue: ['662', '9586', '1977'], redScore: 434, blueScore: 147 },
-  { num: 53, date: '2026-08-26', hour: 9, minute: 46, red: ['7485', '9068', '3288'], blue: ['1339', '2083', '8334'], redScore: 209, blueScore: 154 },
-  { num: 54, date: '2026-08-26', hour: 9, minute: 56, red: ['10333', '1619', '10114'], blue: ['4944', '9134', '159'], redScore: 132, blueScore: 157 },
-  { num: 55, date: '2026-08-26', hour: 10, minute: 5, red: ['2945', '11220', '4068'], blue: ['8044', '4183', '2996'], redScore: 98, blueScore: 381 },
-  { num: 56, date: '2026-08-26', hour: 10, minute: 15, red: ['5493', '9068', '2083'], blue: ['9586', '6358', '4499'], redScore: 139, blueScore: 138 },
-  { num: 57, date: '2026-08-26', hour: 10, minute: 26, red: ['4418', '1619', '2240'], blue: ['9134', '8334', '4293'], redScore: 273, blueScore: 92 },
-  { num: 58, date: '2026-08-26', hour: 10, minute: 34, red: ['662', '498', '9501'], blue: ['4944', '4183', '11220'], redScore: 326, blueScore: 30 },
-  { num: 59, date: '2026-08-26', hour: 10, minute: 42, red: ['8044', '7485', '1339'], blue: ['10114', '2996', '1977'], redScore: 382, blueScore: 216 },
-  { num: 60, date: '2026-08-26', hour: 10, minute: 52, red: ['4068', '4550', '159'], blue: ['3807', '10333', '3648'], redScore: 117, blueScore: 43 },
-  { num: 61, date: '2026-08-26', hour: 11, minute: 2, red: ['-4388', '5493', '2945'], blue: ['3288', '498', '4183'], redScore: 25, blueScore: 326 },
-  { num: 62, date: '2026-08-26', hour: 11, minute: 10, red: ['9501', '1619', '8334'], blue: ['9586', '10114', '8044'], redScore: 255, blueScore: 346 },
-  { num: 63, date: '2026-08-26', hour: 11, minute: 23, red: ['4499', '1977', '1339'], blue: ['2996', '4418', '10333'], redScore: 154, blueScore: 129 },
-  { num: 64, date: '2026-08-26', hour: 11, minute: 34, red: ['4068', '3648', '4293'], blue: ['4550', '2083', '7485'], redScore: 110, blueScore: 91 },
-  { num: 65, date: '2026-08-26', hour: 11, minute: 43, red: ['4944', '2945', '9068'], blue: ['-4388', '159', '11220'], redScore: 388, blueScore: 195 },
-  { num: 66, date: '2026-08-26', hour: 11, minute: 56, red: ['3807', '3288', '6358'], blue: ['9134', '662', '2240'], redScore: 59, blueScore: 183 },
+const FAKE_QUALS_TEAMS = [
+  ['2910', '971', '3256', '9032', '5940', '973'],
+  ['9023', '1540', '4698', '687', '6017', '6647'],
+  ['359', '6665', '581', '4499', '6036', '694'],
+  ['1868', '3847', '9496', '604', '846', '9128'],
+  ['1678', '6238', '3045', '5199', '9408', '5026'],
+  ['2813', '254', '8229', '2073', '4270', '6800'],
+  ['9470', '841', '972', '4414', '2046', '5507'],
+  ['9128', '9496', '9408', '694', '3256', '5026'],
+  ['1678', '9032', '4698', '581', '5940', '604'],
+  ['6647', '1868', '973', '6800', '841', '3045'],
+  ['2046', '9470', '6036', '3847', '1540', '2910'],
+  ['254', '4414', '4270', '9023', '4499', '6238'],
+  ['2813', '5199', '972', '6017', '359', '846'],
+  ['971', '6665', '5507', '2073', '8229', '687'],
+  ['5026', '841', '1868', '4698', '254', '5940'],
+  ['9128', '6036', '1678', '9032', '9023', '359'],
+  ['3847', '6017', '4414', '6665', '6800', '9496'],
+  ['6647', '3045', '4270', '9408', '5507', '972'],
+  ['4499', '5199', '9470', '2813', '1540', '971'],
+  ['8229', '3256', '846', '2910', '694', '6238'],
+  ['604', '2046', '2073', '581', '973', '687'],
+  ['359', '6800', '971', '3045', '9128', '4698'],
+  ['2910', '4414', '4499', '9408', '1868', '1678'],
+  ['973', '694', '5199', '254', '3847', '5507'],
+  ['6665', '5940', '9470', '9032', '6647', '6238'],
+  ['6017', '5026', '1540', '604', '8229', '972'],
+  ['581', '841', '9023', '9496', '2813', '846'],
+  ['3256', '2073', '6036', '4270', '2046', '687'],
+  ['9470', '694', '971', '604', '6800', '1678'],
+  ['846', '6238', '5026', '9032', '841', '5507'],
+  ['581', '4499', '2813', '3256', '3847', '3045'],
+  ['6036', '9408', '973', '6017', '1868', '8229'],
+  ['4698', '2910', '2046', '6647', '254', '9496'],
+  ['5199', '359', '2073', '9023', '5940', '4414'],
+  ['687', '1540', '972', '4270', '9128', '6665'],
+  ['5026', '4698', '6647', '3847', '6036', '2813'],
+  ['6238', '1868', '5507', '2046', '1678', '359'],
+  ['6665', '9408', '6017', '2073', '971', '9128'],
+  ['3045', '8229', '973', '9470', '9023', '9496'],
+  ['9032', '4414', '972', '3256', '254', '581'],
+  ['604', '4270', '694', '841', '2910', '5199'],
+  ['846', '687', '6800', '4499', '5940', '1540'],
+  ['581', '4414', '4698', '973', '9470', '9128'],
+  ['2813', '4270', '9023', '694', '1868', '9032'],
+  ['6238', '8229', '1540', '1678', '972', '3847'],
+  ['604', '687', '6665', '9408', '3045', '5940'],
+  ['841', '2046', '3256', '971', '5199', '6017'],
+  ['2073', '5026', '9496', '359', '6647', '4499'],
+  ['254', '6036', '6800', '5507', '846', '2910'],
+  ['3847', '5940', '971', '1868', '972', '9023'],
+  ['9408', '694', '2813', '359', '1540', '973'],
+  ['9128', '841', '4499', '8229', '4698', '5507'],
+  ['6800', '6017', '2910', '581', '6238', '2073'],
+  ['604', '254', '5026', '3256', '9470', '4270'],
+  ['3045', '4414', '9496', '687', '9032', '6036'],
+  ['6665', '6647', '2046', '1678', '5199', '846'],
+  ['2073', '694', '972', '9470', '4698', '1868'],
+  ['687', '9128', '3847', '6238', '841', '973'],
+  ['846', '1540', '581', '4414', '5026', '971'],
+  ['2046', '5199', '9032', '6800', '9408', '8229'],
+  ['4270', '1678', '5940', '6036', '9496', '6017'],
+  ['5507', '6647', '9023', '4499', '3256', '604'],
+  ['359', '3045', '2813', '6665', '2910', '254'],
+  ['5940', '687', '1868', '581', '8229', '5199'],
+  ['3256', '1678', '1540', '841', '4698', '2073'],
+  ['9032', '3045', '4499', '6017', '2046', '694'],
+  ['9128', '6238', '254', '6647', '6036', '971'],
+  ['2910', '9023', '973', '6665', '972', '5026'],
+  ['5507', '604', '9496', '6800', '2813', '4414'],
+  ['846', '3847', '9470', '4270', '359', '9408'],
 ];
 
+const FAKE_PLAYOFF_TEAMS = [
+  ['2073', '4414', '2910', '3847', '5507', '973'],
+  ['1540', '6800', '2813', '6665', '1678', '5026'],
+  ['9128', '5940', '9408', '9032', '971', '9496'],
+  ['694', '254', '581', '4698', '2046', '604'],
+  ['3847', '5507', '973', '3256', '6800', '2813'],
+  ['9032', '359', '9496', '4698', '5199', '604'],
+  ['9023', '4414', '2910', '5026', '1678', '6665'],
+  ['9128', '5940', '9408', '694', '254', '581'],
+  ['6665', '1678', '5026', '9032', '971', '9496'],
+  ['9470', '5940', '9408', '3256', '6800', '2813'],
+  ['9023', '4414', '2910', '694', '254', '581'],
+  ['3256', '6800', '2813', '6665', '1678', '5026'],
+  ['694', '254', '581', '3256', '6800', '2813'],
+  ['9023', '4414', '2910', '694', '254', '581'],
+  ['9023', '4414', '2910', '694', '254', '581'],
+];
 
-function fakePracticeScore(seed) {
-  const rand = (n) => {
-    const x = Math.sin(n) * 10000;
-    return x - Math.floor(x);
-  };
+function fakeSlot(index, startMinutes, cycleMinutes) {
+  const total = startMinutes + index * cycleMinutes;
+  return { hour: Math.floor(total / 60), minute: total % 60 };
+}
+
+const FAKE_QUALS_SCHEDULE = FAKE_QUALS_TEAMS.map((row, i) => {
+  const dayOne = i < 35;
   return {
-    redScore: Math.round(40 + rand(seed) * 380),
-    blueScore: Math.round(40 + rand(seed + 0.5) * 380),
+    num: i + 1,
+    date: dayOne ? '2026-08-24' : '2026-08-25',
+    ...fakeSlot(dayOne ? i : i - 35, 9 * 60, 7),
+    red: row.slice(0, 3),
+    blue: row.slice(3, 6),
   };
-}
+});
 
-function fakePracticeMatches() {
-  const nowSec = Date.now() / 1000;
-  return FAKE_PRACTICE_SCHEDULE.map((p) => {
-    const t = fakeMstEpochSeconds(p.date, p.hour, p.minute);
-    const played = nowSec >= t;
-    const { redScore, blueScore } = fakePracticeScore(p.num);
-    return {
-      key: `${FAKE_EVENT_KEY}_p${p.num}`,
-      comp_level: 'p',
-      match_number: p.num,
-      set_number: 1,
-      predicted_time: t,
-      actual_time: played ? t : null,
-      alliances: {
-        red: { team_keys: p.red.map((n) => `frc${n}`), score: played ? redScore : -1 },
-        blue: { team_keys: p.blue.map((n) => `frc${n}`), score: played ? blueScore : -1 },
-      },
-    };
-  });
-}
+const FAKE_PLAYOFF_SCHEDULE = FAKE_PLAYOFF_TEAMS.map((row, i) => ({
+  num: i + 1,
+  date: '2026-08-26',
+  ...fakeSlot(i, 10 * 60, 10),
+  isFinal: i >= 13,
+  red: row.slice(0, 3),
+  blue: row.slice(3, 6),
+}));
 
-function fakeQualsMatches() {
-  const nowSec = Date.now() / 1000;
-  return FAKE_QUALS_SCHEDULE.map((q) => {
+function fakeMatches() {
+  const qual = FAKE_QUALS_SCHEDULE.map((q) => {
     const t = fakeMstEpochSeconds(q.date, q.hour, q.minute);
-    const played = nowSec >= t;
     return {
       key: `${FAKE_EVENT_KEY}_qm${q.num}`,
       comp_level: 'qm',
       match_number: q.num,
       set_number: 1,
       predicted_time: t,
-      actual_time: played ? t : null,
+      actual_time: null,
       alliances: {
-        red: { team_keys: q.red.map((n) => `frc${n}`), score: played ? q.redScore : -1 },
-        blue: { team_keys: q.blue.map((n) => `frc${n}`), score: played ? q.blueScore : -1 },
+        red: { team_keys: q.red.map((n) => `frc${n}`), score: -1 },
+        blue: { team_keys: q.blue.map((n) => `frc${n}`), score: -1 },
       },
     };
   });
+  const playoff = FAKE_PLAYOFF_SCHEDULE.map((p) => {
+    const t = fakeMstEpochSeconds(p.date, p.hour, p.minute);
+    const finalNum = p.num - 13;
+    return {
+      key: p.isFinal ? `${FAKE_EVENT_KEY}_f1m${finalNum}` : `${FAKE_EVENT_KEY}_sf${p.num}m1`,
+      comp_level: p.isFinal ? 'f' : 'sf',
+      match_number: p.isFinal ? finalNum : 1,
+      set_number: p.isFinal ? 1 : p.num,
+      predicted_time: t,
+      actual_time: null,
+      alliances: {
+        red: { team_keys: p.red.map((n) => `frc${n}`), score: -1 },
+        blue: { team_keys: p.blue.map((n) => `frc${n}`), score: -1 },
+      },
+    };
+  });
+  return [...qual, ...playoff];
 }
 
-function fakeMatches() {
-  return [...fakePracticeMatches(), ...fakeQualsMatches()];
+function fakeRand(seed) {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
 }
 
-function fakePlayedQualsSoFar() {
-  const nowSec = Date.now() / 1000;
-  return FAKE_QUALS_SCHEDULE.filter((q) => nowSec >= fakeMstEpochSeconds(q.date, q.hour, q.minute));
+function fakeTeamStrength(team) {
+  return 60 + fakeRand(Number(team) * 12.9898) * 170;
+}
+
+function fakeSimulatedQuals() {
+  return FAKE_QUALS_SCHEDULE.map((q) => {
+    const redScore = q.red.reduce((sum, t) => sum + fakeTeamStrength(t), 0) * (0.8 + 0.4 * fakeRand(q.num * 2));
+    const blueScore = q.blue.reduce((sum, t) => sum + fakeTeamStrength(t), 0) * (0.8 + 0.4 * fakeRand(q.num * 2 + 1));
+    return { red: q.red, blue: q.blue, redScore: Math.round(redScore), blueScore: Math.round(blueScore) };
+  });
 }
 
 function solveLinearSystem(A, b) {
@@ -565,10 +571,12 @@ function solveLinearSystem(A, b) {
   return b.map((v, i) => (Math.abs(A[i][i]) < 1e-9 ? 0 : v / A[i][i]));
 }
 
+let fakeOprCache = null;
+
 function computeFakeOprs() {
-  const played = fakePlayedQualsSoFar();
+  if (fakeOprCache) return fakeOprCache;
+  const played = fakeSimulatedQuals();
   const teamKeys = [...new Set(played.flatMap((q) => [...q.red, ...q.blue]))].map((n) => `frc${n}`);
-  if (teamKeys.length === 0) return {};
   const index = new Map(teamKeys.map((k, i) => [k, i]));
   const n = teamKeys.length;
   const AtA = Array.from({ length: n }, () => new Array(n).fill(0));
@@ -586,6 +594,7 @@ function computeFakeOprs() {
   const solved = solveLinearSystem(AtA, Atb);
   const result = {};
   teamKeys.forEach((k, i) => { result[k] = Math.max(0, Number(solved[i].toFixed(2))); });
+  fakeOprCache = result;
   return result;
 }
 
@@ -593,47 +602,43 @@ function fakeOprs() {
   return computeFakeOprs();
 }
 
+const FAKE_ALLIANCE_PICKS = [
+  ['4414', '2910', '2073', '9023'],
+  ['9408', '5940', '9470', '9128'],
+  ['254', '581', '694', '841'],
+  ['2813', '6800', '1540', '3256'],
+  ['5026', '1678', '6665', '1868'],
+  ['4698', '2046', '604', '5199'],
+  ['971', '9496', '9032', '359'],
+  ['5507', '3847', '973', '687'],
+];
+
+function fakeAlliances() {
+  return FAKE_ALLIANCE_PICKS.map((picks, i) => ({
+    name: `Alliance ${i + 1}`,
+    picks: picks.map((n) => `frc${n}`),
+  }));
+}
+
 function computeFakeStandings() {
-  const played = fakePlayedQualsSoFar();
   const oprs = computeFakeOprs();
-  const record = new Map();
-  const bump = (team, key) => {
-    const r = record.get(team) || { wins: 0, losses: 0, ties: 0 };
-    r[key]++;
-    record.set(team, r);
-  };
-  for (const q of played) {
-    if (q.redScore > q.blueScore) {
-      q.red.forEach((t) => bump(t, 'wins'));
-      q.blue.forEach((t) => bump(t, 'losses'));
-    } else if (q.blueScore > q.redScore) {
-      q.blue.forEach((t) => bump(t, 'wins'));
-      q.red.forEach((t) => bump(t, 'losses'));
-    } else {
-      q.red.forEach((t) => bump(t, 'ties'));
-      q.blue.forEach((t) => bump(t, 'ties'));
-    }
-  }
   const allTeams = [...new Set(FAKE_QUALS_SCHEDULE.flatMap((q) => [...q.red, ...q.blue]))];
-  const rows = allTeams.map((team) => {
-    const r = record.get(team) || { wins: 0, losses: 0, ties: 0 };
-    return {
-      team_number: team,
-      name: team === FAKE_TEAM_NUMBER ? 'Ridgebotics (test)' : `Team ${team}`,
-      opr: oprs[`frc${team}`] ?? null,
-      wins: r.wins,
-      losses: r.losses,
-      ties: r.ties,
-    };
-  });
-  rows.sort((a, b) => (b.wins * 2 + b.ties) - (a.wins * 2 + a.ties) || (b.opr ?? 0) - (a.opr ?? 0));
+  const rows = allTeams.map((team) => ({
+    team_number: team,
+    name: `Team ${team}`,
+    opr: oprs[`frc${team}`] ?? null,
+    wins: 0,
+    losses: 0,
+    ties: 0,
+  }));
+  rows.sort((a, b) => (b.opr ?? 0) - (a.opr ?? 0));
   rows.forEach((row, i) => { row.rank = i + 1; });
   return rows;
 }
 
-function fakeStatus() {
+function fakeStatus(teamNumber) {
   const standings = computeFakeStandings();
-  const me = standings.find((r) => r.team_number === FAKE_TEAM_NUMBER);
+  const me = standings.find((r) => r.team_number === cleanString(teamNumber));
   if (!me) return { qual: { ranking: null, num_teams: standings.length } };
   return {
     qual: {
@@ -646,10 +651,10 @@ function fakeStatus() {
 function fakeEventTeamsList() {
   const allTeams = [...new Set(FAKE_QUALS_SCHEDULE.flatMap((q) => [...q.red, ...q.blue]))];
   return allTeams
-    .sort((a, b) => Math.abs(Number(a)) - Math.abs(Number(b)))
+    .sort((a, b) => Number(a) - Number(b))
     .map((n) => ({
       team_number: n,
-      name: n === FAKE_TEAM_NUMBER ? 'Ridgebotics (test)' : `Team ${n}`,
+      name: `Team ${n}`,
     }));
 }
 
@@ -1654,7 +1659,7 @@ app.get('/match/data', async (req, res) => {
   const eventKey = cleanString(req.query.eventKey);
 
   if (isFakeTeamNumber(teamNumber)) {
-    return res.json({ matches: fakeMatches(), oprs: fakeOprs(), status: fakeStatus() });
+    return res.json({ matches: fakeMatches(), oprs: fakeOprs(), status: fakeStatus(teamNumber) });
   }
 
   if (!TBA_AUTH_KEY) {
@@ -1710,7 +1715,7 @@ app.get('/event/alliances', async (req, res) => {
   const eventKey = cleanString(req.query.eventKey);
 
   if (eventKey === FAKE_EVENT_KEY) {
-    return res.json({ alliances: [] });
+    return res.json({ alliances: fakeAlliances() });
   }
 
   if (!TBA_AUTH_KEY) {
@@ -1902,7 +1907,11 @@ app.get('/push/check', async (req, res) => {
         const label = (match) =>
           match.comp_level === 'qm'
             ? `Quals ${match.match_number}`
-            : `${match.comp_level.toUpperCase()} ${match.match_number}`;
+            : match.comp_level === 'f'
+              ? `Finals ${match.match_number}`
+              : match.comp_level === 'sf'
+                ? `Playoff ${match.set_number}`
+                : `${match.comp_level.toUpperCase()} ${match.match_number}`;
 
         let oprMapPromise = null;
         const getOprMap = () => {
@@ -2210,7 +2219,7 @@ app.get('/team/profile', async (req, res) => {
 
   if (isFakeTeamNumber(teamNumber)) {
     return res.json({
-      team_name: 'Ridgebotics (test)',
+      team_name: `Team ${teamNumber}`,
       rookie_year: new Date().getFullYear(),
       world_rank: null,
       events: [],
