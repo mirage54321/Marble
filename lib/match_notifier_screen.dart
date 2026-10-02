@@ -5,6 +5,7 @@ import 'match/match_data_controller.dart';
 import 'match/match_scope.dart';
 import 'match/match_theme.dart';
 import 'match/match_top_bar.dart';
+import 'match/tabs/match_accuracy_tab.dart';
 import 'match/tabs/match_events_tab.dart';
 import 'match/tabs/match_simulator_tab.dart';
 import 'match/tabs/match_stats_tab.dart';
@@ -56,6 +57,9 @@ class _MatchNotifierScreenState extends State<MatchNotifierScreen> {
           }
 
           final showingPushHint = _controller.myTeam?.showPushHint ?? false;
+          final showAccuracy = _controller.canSeeAccuracy;
+          final tabCount = showAccuracy ? 5 : 4;
+          final tabIndex = _tabIndex >= tabCount ? 0 : _tabIndex;
           return Scaffold(
             backgroundColor: const Color.fromARGB(255, 255, 255, 248),
             appBar: const MatchTopBar(),
@@ -64,7 +68,7 @@ class _MatchNotifierScreenState extends State<MatchNotifierScreen> {
                 SafeArea(
                   top: false,
                   child: IndexedStack(
-                    index: _tabIndex,
+                    index: tabIndex,
                     children: [
                       MyTeamTab(onOpenStats: () => setState(() {
                         _tabIndex = 1;
@@ -73,6 +77,7 @@ class _MatchNotifierScreenState extends State<MatchNotifierScreen> {
                       MatchStatsTab(focusMyTeamToken: _statsFocusToken),
                       MatchEventsTab(),
                       MatchSimulatorTab(),
+                      if (showAccuracy) const MatchAccuracyTab(),
                     ],
                   ),
                 ),
@@ -87,7 +92,7 @@ class _MatchNotifierScreenState extends State<MatchNotifierScreen> {
               ],
             ),
             bottomNavigationBar: NavigationBar(
-              selectedIndex: _tabIndex,
+              selectedIndex: tabIndex,
               onDestinationSelected: (i) {
                 if (showingPushHint) {
                   _controller.dismissPushButtonHint();
@@ -97,11 +102,13 @@ class _MatchNotifierScreenState extends State<MatchNotifierScreen> {
               },
               backgroundColor: showingPushHint ? const Color(0xff737373) : Colors.white,
               indicatorColor: showingPushHint ? Colors.transparent : MatchColors.yellorLight,
-              destinations: const [
+              destinations: [
                 NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'My Team'),
                 NavigationDestination(icon: Icon(Icons.leaderboard_outlined), selectedIcon: Icon(Icons.leaderboard), label: 'Stats'),
                 NavigationDestination(icon: Icon(Icons.event_outlined), selectedIcon: Icon(Icons.event), label: 'Events'),
                 NavigationDestination(icon: Icon(Icons.compare_arrows_outlined), selectedIcon: Icon(Icons.compare_arrows), label: 'Sim'),
+                if (showAccuracy)
+                  NavigationDestination(icon: Icon(Icons.track_changes_outlined), selectedIcon: Icon(Icons.track_changes), label: 'Accuracy'),
               ],
             ),
           );

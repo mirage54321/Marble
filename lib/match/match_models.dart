@@ -1,4 +1,3 @@
-
 class MatchInfo {
   final String key;
   final String compLevel;
@@ -328,5 +327,36 @@ class TeamProfile {
   int? get yearsCompeting {
     if (rookieYear == null) return null;
     return DateTime.now().year - rookieYear! + 1;
+  }
+}
+
+class ModelAccuracy {
+  final int games;
+  final int correct;
+  final int eventsCounted;
+  final double? accuracyPct;
+  final double? avgMarginError;
+  final DateTime? refreshedAt;
+
+  const ModelAccuracy({
+    required this.games,
+    required this.correct,
+    required this.eventsCounted,
+    required this.accuracyPct,
+    required this.avgMarginError,
+    required this.refreshedAt,
+  });
+
+  factory ModelAccuracy.fromJson(Map<String, dynamic> json) {
+    return ModelAccuracy(
+      games: (json['games'] as num?)?.toInt() ?? 0,
+      correct: (json['correct'] as num?)?.toInt() ?? 0,
+      eventsCounted: (json['eventsCounted'] as num?)?.toInt() ?? 0,
+      accuracyPct: (json['accuracyPct'] as num?)?.toDouble(),
+      avgMarginError: (json['avgMarginError'] as num?)?.toDouble(),
+      refreshedAt: json['refreshedAt'] != null
+          ? DateTime.tryParse(json['refreshedAt'] as String)
+          : null,
+    );
   }
 }

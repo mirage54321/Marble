@@ -764,6 +764,27 @@ class MatchDataController extends ChangeNotifier {
     }();
   }
 
+  // The Accuracy tab is only offered when signed in as the test team.
+  bool get canSeeAccuracy => myTeam?.teamNumber == _fakeTeamNumber;
+
+  Future<ModelAccuracy> loadModelAccuracy() async {
+    final uri = Uri.parse('$backendBase/world/accuracy?year=${DateTime.now().year}');
+    final res = await http.get(uri).timeout(const Duration(seconds: 25));
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode == 202) {
+      throw StateError(
+        data['message'] as String? ??
+            'Accuracy is being calculated. Try again in a minute or two.',
+      );
+    }
+    if (res.statusCode != 200) {
+      throw StateError(
+        data['error'] as String? ?? 'Could not load model accuracy',
+      );
+    }
+    return ModelAccuracy.fromJson(data);
+  }
+
   Future<({TeamStats team, List<TeamStats> nearby})> loadWorldTeamStat(String teamNumber) async {
     final uri = Uri.parse('$backendBase/world/team/$teamNumber');
     final res = await http.get(uri).timeout(const Duration(seconds: 12));

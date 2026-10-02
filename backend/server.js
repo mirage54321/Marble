@@ -322,346 +322,6 @@ function notificationForStage(teamNumber, label, stage, extra = {}) {
   }
 }
 
-const FAKE_EVENT_KEY = 'faketest2026';
-
-const FAKE_ACCESS_TEAMS = new Set(
-  (process.env.FAKE_EVENT_TEAMS || '4414')
-    .split(',')
-    .map((t) => t.trim())
-    .filter(Boolean),
-);
-
-function isFakeTeamNumber(teamNumber) {
-  const cleaned = cleanString(teamNumber);
-  return cleaned !== null && FAKE_ACCESS_TEAMS.has(cleaned);
-}
-
-const FAKE_DATE_TO_DAY_OFFSET = {
-  '2026-08-24': 0,
-  '2026-08-25': 1,
-  '2026-08-26': 2,
-};
-
-const FAKE_FIXED_ANCHOR = new Date(Date.UTC(2026, 9, 2));
-
-function fakeResolvedDate(oldDateStr) {
-  const offset = FAKE_DATE_TO_DAY_OFFSET[oldDateStr];
-  const d = new Date(FAKE_FIXED_ANCHOR);
-  d.setUTCDate(d.getUTCDate() + offset);
-  return d.toISOString().slice(0, 10);
-}
-
-function fakeEvent() {
-  return {
-    key: FAKE_EVENT_KEY,
-    name: 'Marble Test Event \u2014 competition replay (fake, no scores)',
-    start_date: fakeResolvedDate('2026-08-24'),
-    end_date: fakeResolvedDate('2026-08-26'),
-    city: 'Colorado Springs',
-    state_prov: 'CO',
-    country: 'USA',
-  };
-}
-
-function denverUtcOffsetHours(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const probe = new Date(Date.UTC(y, m - 1, d, 12));
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Denver',
-    timeZoneName: 'shortOffset',
-  }).formatToParts(probe);
-  const raw = parts.find((p) => p.type === 'timeZoneName')?.value || 'GMT-7';
-  const match = raw.match(/GMT([+-]\d+)/);
-  return match ? parseInt(match[1], 10) : -7;
-}
-
-function fakeMstEpochSeconds(dateStr, hour, minute) {
-  const resolved = fakeResolvedDate(dateStr);
-  const [y, m, d] = resolved.split('-').map(Number);
-  const offsetHours = denverUtcOffsetHours(resolved);
-  return Math.floor(Date.UTC(y, m - 1, d, hour, minute) / 1000) - offsetHours * 3600;
-}
-
-const FAKE_QUALS_TEAMS = [
-  ['2910', '971', '3256', '9032', '5940', '973'],
-  ['9023', '1540', '4698', '687', '6017', '6647'],
-  ['359', '6665', '581', '4499', '6036', '694'],
-  ['1868', '3847', '9496', '604', '846', '9128'],
-  ['1678', '6238', '3045', '5199', '9408', '5026'],
-  ['2813', '254', '8229', '2073', '4270', '6800'],
-  ['9470', '841', '972', '4414', '2046', '5507'],
-  ['9128', '9496', '9408', '694', '3256', '5026'],
-  ['1678', '9032', '4698', '581', '5940', '604'],
-  ['6647', '1868', '973', '6800', '841', '3045'],
-  ['2046', '9470', '6036', '3847', '1540', '2910'],
-  ['254', '4414', '4270', '9023', '4499', '6238'],
-  ['2813', '5199', '972', '6017', '359', '846'],
-  ['971', '6665', '5507', '2073', '8229', '687'],
-  ['5026', '841', '1868', '4698', '254', '5940'],
-  ['9128', '6036', '1678', '9032', '9023', '359'],
-  ['3847', '6017', '4414', '6665', '6800', '9496'],
-  ['6647', '3045', '4270', '9408', '5507', '972'],
-  ['4499', '5199', '9470', '2813', '1540', '971'],
-  ['8229', '3256', '846', '2910', '694', '6238'],
-  ['604', '2046', '2073', '581', '973', '687'],
-  ['359', '6800', '971', '3045', '9128', '4698'],
-  ['2910', '4414', '4499', '9408', '1868', '1678'],
-  ['973', '694', '5199', '254', '3847', '5507'],
-  ['6665', '5940', '9470', '9032', '6647', '6238'],
-  ['6017', '5026', '1540', '604', '8229', '972'],
-  ['581', '841', '9023', '9496', '2813', '846'],
-  ['3256', '2073', '6036', '4270', '2046', '687'],
-  ['9470', '694', '971', '604', '6800', '1678'],
-  ['846', '6238', '5026', '9032', '841', '5507'],
-  ['581', '4499', '2813', '3256', '3847', '3045'],
-  ['6036', '9408', '973', '6017', '1868', '8229'],
-  ['4698', '2910', '2046', '6647', '254', '9496'],
-  ['5199', '359', '2073', '9023', '5940', '4414'],
-  ['687', '1540', '972', '4270', '9128', '6665'],
-  ['5026', '4698', '6647', '3847', '6036', '2813'],
-  ['6238', '1868', '5507', '2046', '1678', '359'],
-  ['6665', '9408', '6017', '2073', '971', '9128'],
-  ['3045', '8229', '973', '9470', '9023', '9496'],
-  ['9032', '4414', '972', '3256', '254', '581'],
-  ['604', '4270', '694', '841', '2910', '5199'],
-  ['846', '687', '6800', '4499', '5940', '1540'],
-  ['581', '4414', '4698', '973', '9470', '9128'],
-  ['2813', '4270', '9023', '694', '1868', '9032'],
-  ['6238', '8229', '1540', '1678', '972', '3847'],
-  ['604', '687', '6665', '9408', '3045', '5940'],
-  ['841', '2046', '3256', '971', '5199', '6017'],
-  ['2073', '5026', '9496', '359', '6647', '4499'],
-  ['254', '6036', '6800', '5507', '846', '2910'],
-  ['3847', '5940', '971', '1868', '972', '9023'],
-  ['9408', '694', '2813', '359', '1540', '973'],
-  ['9128', '841', '4499', '8229', '4698', '5507'],
-  ['6800', '6017', '2910', '581', '6238', '2073'],
-  ['604', '254', '5026', '3256', '9470', '4270'],
-  ['3045', '4414', '9496', '687', '9032', '6036'],
-  ['6665', '6647', '2046', '1678', '5199', '846'],
-  ['2073', '694', '972', '9470', '4698', '1868'],
-  ['687', '9128', '3847', '6238', '841', '973'],
-  ['846', '1540', '581', '4414', '5026', '971'],
-  ['2046', '5199', '9032', '6800', '9408', '8229'],
-  ['4270', '1678', '5940', '6036', '9496', '6017'],
-  ['5507', '6647', '9023', '4499', '3256', '604'],
-  ['359', '3045', '2813', '6665', '2910', '254'],
-  ['5940', '687', '1868', '581', '8229', '5199'],
-  ['3256', '1678', '1540', '841', '4698', '2073'],
-  ['9032', '3045', '4499', '6017', '2046', '694'],
-  ['9128', '6238', '254', '6647', '6036', '971'],
-  ['2910', '9023', '973', '6665', '972', '5026'],
-  ['5507', '604', '9496', '6800', '2813', '4414'],
-  ['846', '3847', '9470', '4270', '359', '9408'],
-];
-
-const FAKE_PLAYOFF_TEAMS = [
-  ['2073', '4414', '2910', '3847', '5507', '973'],
-  ['1540', '6800', '2813', '6665', '1678', '5026'],
-  ['9128', '5940', '9408', '9032', '971', '9496'],
-  ['694', '254', '581', '4698', '2046', '604'],
-  ['3847', '5507', '973', '3256', '6800', '2813'],
-  ['9032', '359', '9496', '4698', '5199', '604'],
-  ['9023', '4414', '2910', '5026', '1678', '6665'],
-  ['9128', '5940', '9408', '694', '254', '581'],
-  ['6665', '1678', '5026', '9032', '971', '9496'],
-  ['9470', '5940', '9408', '3256', '6800', '2813'],
-  ['9023', '4414', '2910', '694', '254', '581'],
-  ['3256', '6800', '2813', '6665', '1678', '5026'],
-  ['694', '254', '581', '3256', '6800', '2813'],
-  ['9023', '4414', '2910', '694', '254', '581'],
-  ['9023', '4414', '2910', '694', '254', '581'],
-];
-
-function fakeSlot(index, startMinutes, cycleMinutes) {
-  const total = startMinutes + index * cycleMinutes;
-  return { hour: Math.floor(total / 60), minute: total % 60 };
-}
-
-const FAKE_QUALS_SCHEDULE = FAKE_QUALS_TEAMS.map((row, i) => {
-  const dayOne = i < 35;
-  return {
-    num: i + 1,
-    date: dayOne ? '2026-08-24' : '2026-08-25',
-    ...fakeSlot(dayOne ? i : i - 35, 9 * 60, 7),
-    red: row.slice(0, 3),
-    blue: row.slice(3, 6),
-  };
-});
-
-const FAKE_PLAYOFF_SCHEDULE = FAKE_PLAYOFF_TEAMS.map((row, i) => ({
-  num: i + 1,
-  date: '2026-08-26',
-  ...fakeSlot(i, 10 * 60, 10),
-  isFinal: i >= 13,
-  red: row.slice(0, 3),
-  blue: row.slice(3, 6),
-}));
-
-function fakeMatches() {
-  const qual = FAKE_QUALS_SCHEDULE.map((q) => {
-    const t = fakeMstEpochSeconds(q.date, q.hour, q.minute);
-    return {
-      key: `${FAKE_EVENT_KEY}_qm${q.num}`,
-      comp_level: 'qm',
-      match_number: q.num,
-      set_number: 1,
-      predicted_time: t,
-      actual_time: null,
-      alliances: {
-        red: { team_keys: q.red.map((n) => `frc${n}`), score: -1 },
-        blue: { team_keys: q.blue.map((n) => `frc${n}`), score: -1 },
-      },
-    };
-  });
-  const playoff = FAKE_PLAYOFF_SCHEDULE.map((p) => {
-    const t = fakeMstEpochSeconds(p.date, p.hour, p.minute);
-    const finalNum = p.num - 13;
-    return {
-      key: p.isFinal ? `${FAKE_EVENT_KEY}_f1m${finalNum}` : `${FAKE_EVENT_KEY}_sf${p.num}m1`,
-      comp_level: p.isFinal ? 'f' : 'sf',
-      match_number: p.isFinal ? finalNum : 1,
-      set_number: p.isFinal ? 1 : p.num,
-      predicted_time: t,
-      actual_time: null,
-      alliances: {
-        red: { team_keys: p.red.map((n) => `frc${n}`), score: -1 },
-        blue: { team_keys: p.blue.map((n) => `frc${n}`), score: -1 },
-      },
-    };
-  });
-  return [...qual, ...playoff];
-}
-
-function fakeRand(seed) {
-  const x = Math.sin(seed) * 10000;
-  return x - Math.floor(x);
-}
-
-function fakeTeamStrength(team) {
-  return 60 + fakeRand(Number(team) * 12.9898) * 170;
-}
-
-function fakeSimulatedQuals() {
-  return FAKE_QUALS_SCHEDULE.map((q) => {
-    const redScore = q.red.reduce((sum, t) => sum + fakeTeamStrength(t), 0) * (0.8 + 0.4 * fakeRand(q.num * 2));
-    const blueScore = q.blue.reduce((sum, t) => sum + fakeTeamStrength(t), 0) * (0.8 + 0.4 * fakeRand(q.num * 2 + 1));
-    return { red: q.red, blue: q.blue, redScore: Math.round(redScore), blueScore: Math.round(blueScore) };
-  });
-}
-
-function solveLinearSystem(A, b) {
-  const n = b.length;
-  for (let col = 0; col < n; col++) {
-    let pivot = col;
-    for (let row = col + 1; row < n; row++) {
-      if (Math.abs(A[row][col]) > Math.abs(A[pivot][col])) pivot = row;
-    }
-    [A[col], A[pivot]] = [A[pivot], A[col]];
-    [b[col], b[pivot]] = [b[pivot], b[col]];
-    if (Math.abs(A[col][col]) < 1e-9) continue;
-    for (let row = 0; row < n; row++) {
-      if (row === col) continue;
-      const factor = A[row][col] / A[col][col];
-      if (factor === 0) continue;
-      for (let c = col; c < n; c++) A[row][c] -= factor * A[col][c];
-      b[row] -= factor * b[col];
-    }
-  }
-  return b.map((v, i) => (Math.abs(A[i][i]) < 1e-9 ? 0 : v / A[i][i]));
-}
-
-let fakeOprCache = null;
-
-function computeFakeOprs() {
-  if (fakeOprCache) return fakeOprCache;
-  const played = fakeSimulatedQuals();
-  const teamKeys = [...new Set(played.flatMap((q) => [...q.red, ...q.blue]))].map((n) => `frc${n}`);
-  const index = new Map(teamKeys.map((k, i) => [k, i]));
-  const n = teamKeys.length;
-  const AtA = Array.from({ length: n }, () => new Array(n).fill(0));
-  const Atb = new Array(n).fill(0);
-  for (const q of played) {
-    for (const [teams, score] of [[q.red, q.redScore], [q.blue, q.blueScore]]) {
-      const idxs = teams.map((t) => index.get(`frc${t}`));
-      for (const i of idxs) {
-        Atb[i] += score;
-        for (const j of idxs) AtA[i][j] += 1;
-      }
-    }
-  }
-  for (let i = 0; i < n; i++) AtA[i][i] += 1;
-  const solved = solveLinearSystem(AtA, Atb);
-  const result = {};
-  teamKeys.forEach((k, i) => { result[k] = Math.max(0, Number(solved[i].toFixed(2))); });
-  fakeOprCache = result;
-  return result;
-}
-
-function fakeOprs() {
-  return computeFakeOprs();
-}
-
-const FAKE_ALLIANCE_PICKS = [
-  ['4414', '2910', '2073', '9023'],
-  ['9408', '5940', '9470', '9128'],
-  ['254', '581', '694', '841'],
-  ['2813', '6800', '1540', '3256'],
-  ['5026', '1678', '6665', '1868'],
-  ['4698', '2046', '604', '5199'],
-  ['971', '9496', '9032', '359'],
-  ['5507', '3847', '973', '687'],
-];
-
-function fakeAlliances() {
-  return FAKE_ALLIANCE_PICKS.map((picks, i) => ({
-    name: `Alliance ${i + 1}`,
-    picks: picks.map((n) => `frc${n}`),
-  }));
-}
-
-function computeFakeStandings() {
-  const oprs = computeFakeOprs();
-  const allTeams = [...new Set(FAKE_QUALS_SCHEDULE.flatMap((q) => [...q.red, ...q.blue]))];
-  const rows = allTeams.map((team) => ({
-    team_number: team,
-    name: `Team ${team}`,
-    opr: oprs[`frc${team}`] ?? null,
-    wins: 0,
-    losses: 0,
-    ties: 0,
-  }));
-  rows.sort((a, b) => (b.opr ?? 0) - (a.opr ?? 0));
-  rows.forEach((row, i) => { row.rank = i + 1; });
-  return rows;
-}
-
-function fakeStatus(teamNumber) {
-  const standings = computeFakeStandings();
-  const me = standings.find((r) => r.team_number === cleanString(teamNumber));
-  if (!me) return { qual: { ranking: null, num_teams: standings.length } };
-  return {
-    qual: {
-      ranking: { rank: me.rank, record: { wins: me.wins, losses: me.losses, ties: me.ties } },
-      num_teams: standings.length,
-    },
-  };
-}
-
-function fakeEventTeamsList() {
-  const allTeams = [...new Set(FAKE_QUALS_SCHEDULE.flatMap((q) => [...q.red, ...q.blue]))];
-  return allTeams
-    .sort((a, b) => Number(a) - Number(b))
-    .map((n) => ({
-      team_number: n,
-      name: `Team ${n}`,
-    }));
-}
-
-function fakeEventStats() {
-  return computeFakeStandings();
-}
-
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT;
@@ -1617,10 +1277,6 @@ app.get('/match/events', async (req, res) => {
   const teamNumber = cleanString(req.query.teamNumber);
   const year = cleanString(req.query.year);
 
-  if (isFakeTeamNumber(teamNumber)) {
-    return res.json([fakeEvent()]);
-  }
-
   if (!TBA_AUTH_KEY) {
     return res.status(503).json({ error: 'TBA_AUTH_KEY is not configured on the server' });
   }
@@ -1658,10 +1314,6 @@ app.get('/match/data', async (req, res) => {
   const teamNumber = cleanString(req.query.teamNumber);
   const eventKey = cleanString(req.query.eventKey);
 
-  if (isFakeTeamNumber(teamNumber)) {
-    return res.json({ matches: fakeMatches(), oprs: fakeOprs(), status: fakeStatus(teamNumber) });
-  }
-
   if (!TBA_AUTH_KEY) {
     return res.status(503).json({ error: 'TBA_AUTH_KEY is not configured on the server' });
   }
@@ -1691,10 +1343,6 @@ app.get('/match/data', async (req, res) => {
 app.get('/event/matches', async (req, res) => {
   const eventKey = cleanString(req.query.eventKey);
 
-  if (eventKey === FAKE_EVENT_KEY) {
-    return res.json({ matches: fakeMatches() });
-  }
-
   if (!TBA_AUTH_KEY) {
     return res.status(503).json({ error: 'TBA_AUTH_KEY is not configured on the server' });
   }
@@ -1713,10 +1361,6 @@ app.get('/event/matches', async (req, res) => {
 
 app.get('/event/alliances', async (req, res) => {
   const eventKey = cleanString(req.query.eventKey);
-
-  if (eventKey === FAKE_EVENT_KEY) {
-    return res.json({ alliances: fakeAlliances() });
-  }
 
   if (!TBA_AUTH_KEY) {
     return res.status(503).json({ error: 'TBA_AUTH_KEY is not configured on the server' });
@@ -1883,18 +1527,13 @@ app.get('/push/check', async (req, res) => {
       try {
         const [teamNumber, eventKey] = key.split('|');
         const teamKey = `frc${teamNumber}`;
-        const isFake = isFakeTeamNumber(teamNumber) && eventKey === FAKE_EVENT_KEY;
 
+        if (!TBA_AUTH_KEY) continue;
         let matches;
-        if (isFake) {
-          matches = fakeMatches();
-        } else {
-          if (!TBA_AUTH_KEY) continue;
-          try {
-            matches = await tbaGet(`/team/${teamKey}/event/${eventKey}/matches/simple`);
-          } catch (err) {
-            continue;
-          }
+        try {
+          matches = await tbaGet(`/team/${teamKey}/event/${eventKey}/matches/simple`);
+        } catch (err) {
+          continue;
         }
 
         matches = matches.filter(
@@ -1916,9 +1555,7 @@ app.get('/push/check', async (req, res) => {
         let oprMapPromise = null;
         const getOprMap = () => {
           if (!oprMapPromise) {
-            oprMapPromise = isFake
-              ? Promise.resolve(fakeOprs())
-              : tbaGetOprs(eventKey).then((data) => data.oprs || {});
+            oprMapPromise = tbaGetOprs(eventKey).then((data) => data.oprs || {});
           }
           return oprMapPromise;
         };
@@ -2034,10 +1671,6 @@ app.get('/push/check', async (req, res) => {
 app.get('/event/stats', async (req, res) => {
   const eventKey = cleanString(req.query.eventKey);
 
-  if (eventKey === FAKE_EVENT_KEY) {
-    return res.json(fakeEventStats());
-  }
-
   if (!TBA_AUTH_KEY) {
     return res.status(503).json({ error: 'TBA_AUTH_KEY is not configured on the server' });
   }
@@ -2102,22 +1735,33 @@ async function rebuildWorldRatings(year) {
     [0, 1, 2, 3, 4].includes(event.event_type) && event.end_date &&
     new Date(`${event.end_date}T23:59:59Z`) <= new Date(),
   );
-  const eventRows = await mapWithConcurrency(official, 6, async (event) => {
-    const [teams, oprData, rankings] = await Promise.all([
+  const eventData = await mapWithConcurrency(official, 6, async (event) => {
+    const [teams, oprData, rankings, rawMatches] = await Promise.all([
       tbaGet(`/event/${event.key}/teams/simple`),
       tbaGetOprs(event.key),
       tbaGet(`/event/${event.key}/rankings`).catch(() => ({ rankings: [] })),
+      tbaGet(`/event/${event.key}/matches/simple`).catch(() => []),
     ]);
+    // Keep only what the accuracy backtest needs so memory stays small.
+    const matches = (Array.isArray(rawMatches) ? rawMatches : []).map((m) => ({
+      level: m.comp_level,
+      red: m.alliances?.red?.team_keys || [],
+      blue: m.alliances?.blue?.team_keys || [],
+      redScore: m.alliances?.red?.score,
+      blueScore: m.alliances?.blue?.score,
+    }));
     const names = new Map(teams.map((team) => [team.key, team.nickname || `Team ${team.team_number}`]));
     const records = new Map((rankings.rankings || []).map((r) => [r.team_key, r.record || {}]));
-    return Object.entries(oprData.oprs || {}).map(([teamKey, rawOpr]) => {
+    const rows = Object.entries(oprData.oprs || {}).map(([teamKey, rawOpr]) => {
       const record = records.get(teamKey) || {};
       const played = (record.wins || 0) + (record.losses || 0) + (record.ties || 0);
       return { teamKey, name: names.get(teamKey) || `Team ${teamKey.replace(/^frc/, '')}`,
         opr: Number(rawOpr || 0), weight: Math.max(1, played),
         wins: record.wins || 0, losses: record.losses || 0, ties: record.ties || 0 };
     });
+    return { event, rows, matches };
   });
+  const eventRows = eventData.map((d) => d.rows);
   const totals = new Map();
   for (const rows of eventRows) for (const row of rows) {
     const old = totals.get(row.teamKey) || { ...row, weightedOpr: 0, weightTotal: 0, wins: 0, losses: 0, ties: 0 };
@@ -2135,7 +1779,77 @@ async function rebuildWorldRatings(year) {
   teams.forEach((team, index) => { team.rank = index + 1; });
   const doc = { _id: String(year), year, teams, refreshedAt: new Date(), eventCount: official.length };
   await worldRatingsCollection.replaceOne({ _id: doc._id }, doc, { upsert: true });
+  try {
+    const accuracy = computeModelAccuracy(eventData);
+    await worldRatingsCollection.replaceOne(
+      { _id: `accuracy_${year}` },
+      { _id: `accuracy_${year}`, year, ...accuracy, refreshedAt: new Date() },
+      { upsert: true },
+    );
+  } catch (err) {
+    console.error('Model accuracy calculation failed:', err.message);
+  }
   return doc;
+}
+
+// Backtests the simulator: for every finished match this season, predict it the way the
+// app does (sum of each alliance's World Rating, higher sum wins) using ONLY ratings from
+// events that ended before that event started, then compare to what really happened.
+// Ties (real or predicted) and matches with no rating data on either side are skipped.
+function computeModelAccuracy(eventData) {
+  const history = new Map(); // teamKey -> [{ endMs, opr, weight }]
+  for (const d of eventData) {
+    const endMs = Date.parse(`${d.event.end_date}T23:59:59Z`);
+    for (const row of d.rows) {
+      if (!history.has(row.teamKey)) history.set(row.teamKey, []);
+      history.get(row.teamKey).push({ endMs, opr: row.opr, weight: row.weight });
+    }
+  }
+
+  let games = 0;
+  let correct = 0;
+  let totalMarginError = 0;
+  let eventsCounted = 0;
+
+  for (const d of eventData) {
+    const startMs = Date.parse(`${d.event.start_date}T00:00:00Z`);
+    const ratingCache = new Map();
+    const ratingFor = (teamKey) => {
+      if (ratingCache.has(teamKey)) return ratingCache.get(teamKey);
+      let sum = 0;
+      let weight = 0;
+      for (const h of history.get(teamKey) || []) {
+        if (h.endMs < startMs) { sum += h.opr * h.weight; weight += h.weight; }
+      }
+      const rating = weight > 0 ? sum / weight : 0;
+      ratingCache.set(teamKey, rating);
+      return rating;
+    };
+    const allianceSum = (keys) => keys.reduce((total, key) => total + ratingFor(key), 0);
+
+    let countedHere = 0;
+    for (const m of d.matches) {
+      if (m.level === 'p') continue;
+      if (typeof m.redScore !== 'number' || typeof m.blueScore !== 'number') continue;
+      if (m.redScore < 0 || m.blueScore < 0 || m.redScore === m.blueScore) continue;
+      const redSum = allianceSum(m.red);
+      const blueSum = allianceSum(m.blue);
+      if (redSum === blueSum) continue;
+      games += 1;
+      countedHere += 1;
+      if ((redSum > blueSum) === (m.redScore > m.blueScore)) correct += 1;
+      totalMarginError += Math.abs((redSum - blueSum) - (m.redScore - m.blueScore));
+    }
+    if (countedHere > 0) eventsCounted += 1;
+  }
+
+  return {
+    games,
+    correct,
+    eventsCounted,
+    accuracyPct: games > 0 ? Number(((correct / games) * 100).toFixed(1)) : null,
+    avgMarginError: games > 0 ? Number((totalMarginError / games).toFixed(1)) : null,
+  };
 }
 
 function startWorldRatingRefresh(year) {
@@ -2163,6 +1877,32 @@ app.get('/world/stats', async (req, res) => {
 });
 
 
+app.get('/world/accuracy', async (req, res) => {
+  if (!TBA_AUTH_KEY) return res.status(503).json({ error: 'TBA_AUTH_KEY is not configured on the server' });
+  const year = Number(cleanString(req.query.year) || new Date().getFullYear());
+  try {
+    const cached = await worldRatingsCollection.findOne({ _id: `accuracy_${year}` });
+    const stale = !cached || Date.now() - new Date(cached.refreshedAt).getTime() > WORLD_RATING_CACHE_MS;
+    if (stale) startWorldRatingRefresh(year);
+    if (cached) {
+      return res.json({
+        year,
+        games: cached.games,
+        correct: cached.correct,
+        eventsCounted: cached.eventsCounted,
+        accuracyPct: cached.accuracyPct,
+        avgMarginError: cached.avgMarginError,
+        refreshedAt: cached.refreshedAt,
+        refreshing: stale,
+      });
+    }
+    res.status(202).json({ year, refreshing: true, message: 'Accuracy is being calculated. Try again in a minute or two.' });
+  } catch (err) {
+    console.error('World accuracy error:', err.message);
+    res.status(500).json({ error: 'Could not load model accuracy' });
+  }
+});
+
 app.get('/world/team/:teamNumber', async (req, res) => {
   const year = String(new Date().getFullYear());
   try {
@@ -2178,10 +1918,6 @@ app.get('/world/team/:teamNumber', async (req, res) => {
 
 app.get('/event/teams', async (req, res) => {
   const eventKey = cleanString(req.query.eventKey);
-
-  if (eventKey === FAKE_EVENT_KEY) {
-    return res.json(fakeEventTeamsList());
-  }
 
   if (!TBA_AUTH_KEY) {
     return res.status(503).json({ error: 'TBA_AUTH_KEY is not configured on the server' });
@@ -2216,16 +1952,6 @@ app.get('/event/teams', async (req, res) => {
 
 app.get('/team/profile', async (req, res) => {
   const teamNumber = cleanString(req.query.teamNumber);
-
-  if (isFakeTeamNumber(teamNumber)) {
-    return res.json({
-      team_name: `Team ${teamNumber}`,
-      rookie_year: new Date().getFullYear(),
-      world_rank: null,
-      events: [],
-      awards: [],
-    });
-  }
 
   if (!TBA_AUTH_KEY) {
     return res.status(503).json({ error: 'TBA_AUTH_KEY is not configured on the server' });
