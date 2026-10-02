@@ -342,7 +342,7 @@ const FAKE_DATE_TO_DAY_OFFSET = {
   '2026-08-26': 2,
 };
 
-const FAKE_FIXED_ANCHOR = new Date(Date.UTC(2026, 8, 7));
+const FAKE_FIXED_ANCHOR = new Date(Date.UTC(2026, 9, 2));
 
 function fakeResolvedDate(oldDateStr) {
   const offset = FAKE_DATE_TO_DAY_OFFSET[oldDateStr];
