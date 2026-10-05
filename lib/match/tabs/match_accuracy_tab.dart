@@ -149,9 +149,10 @@ class _MatchAccuracyTabState extends State<MatchAccuracyTab> {
         ),
         const SizedBox(height: 16),
         Text(
-          'Each match is predicted the way the simulator does it: add up every team\u2019s World Rating on each alliance and pick the higher total. '
-          'Only ratings from events that finished before that match\u2019s event started are used, so the model never sees the result it is being graded on. '
-          'Ties and matches where no team had a rating yet are skipped.',
+          'Each match is predicted the way the app does it: add up every team\u2019s rating on each alliance and pick the higher total. '
+          'A team starts each event with its rating from earlier events (recent ones count more), then its rating updates after every match, ignoring foul points. '
+          'A match is always predicted before its result is learned, so the model never sees the answer it is graded on. '
+          'Ties are skipped.',
           style: TextStyle(fontSize: 11, height: 1.5, color: Colors.grey[500]),
         ),
         if (a.refreshedAt != null) ...[

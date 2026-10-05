@@ -38,13 +38,23 @@ class _MatchScheduleScreenState extends State<MatchScheduleScreen> {
       final loadedMatches = await controller
           .loadEventMatches(widget.event.key, forceRefresh: true)
           .timeout(const Duration(seconds: 20));
-      List<TeamStats> stats = [];
+      Map<String, double> liveRatings = {};
       try {
-        stats = await controller
-            .loadWorldTeamStats()
-            .timeout(const Duration(seconds: 15));
+        liveRatings = await controller
+            .loadLiveEventRatings(widget.event.key, forceRefresh: true)
+            .timeout(const Duration(seconds: 20));
       } catch (_) {
-        stats = [];
+        liveRatings = {};
+      }
+      List<TeamStats> stats = [];
+      if (liveRatings.isEmpty) {
+        try {
+          stats = await controller
+              .loadWorldTeamStats()
+              .timeout(const Duration(seconds: 15));
+        } catch (_) {
+          stats = [];
+        }
       }
       if (!mounted) return;
       final sorted = [...loadedMatches]
@@ -58,10 +68,12 @@ class _MatchScheduleScreenState extends State<MatchScheduleScreen> {
         });
       setState(() {
         matches = sorted;
-        oprs = {
-          for (final t in stats)
-            if (t.opr != null) 'frc${t.teamNumber}': t.opr!,
-        };
+        oprs = liveRatings.isNotEmpty
+            ? liveRatings
+            : {
+                for (final t in stats)
+                  if (t.opr != null) 'frc${t.teamNumber}': t.opr!,
+              };
         loading = false;
       });
     } catch (e) {
@@ -170,7 +182,7 @@ class _MatchScheduleScreenState extends State<MatchScheduleScreen> {
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(
-                'Numbers in parentheses are each team\u2019s season-wide average points (World Rating).',
+                'Numbers in parentheses are each team\u2019s live rating: season history plus this event so far.',
                 style: TextStyle(fontSize: 11, color: Colors.grey[500]),
               ),
             );

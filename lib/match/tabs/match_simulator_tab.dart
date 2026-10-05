@@ -104,7 +104,7 @@ class _MatchSimulatorTabState extends State<MatchSimulatorTab>
     final showResult = red.isNotEmpty || blue.isNotEmpty;
     final winProb = (redScore + blueScore) == 0
         ? null
-        : (redScore / (redScore + blueScore)).clamp(0.01, 0.99);
+        : MatchScope.of(context).winProbabilityFromTotals(redScore, blueScore);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),

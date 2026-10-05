@@ -82,7 +82,7 @@ class MatchStatsTabState extends State<MatchStatsTab> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Season-wide Marble World Rating · built from TBA event OPRs',
+                'Season-wide Marble World Rating · built from match results',
                 style: TextStyle(fontSize: 13, color: Colors.grey[600]),
               ),
               const SizedBox(height: 14),

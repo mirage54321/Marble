@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -88,6 +89,12 @@ class MatchDataController extends ChangeNotifier {
   final Map<String, Future<List<MatchInfo>>> _eventMatchesFutures = {};
   final Map<String, Future<List<EventAlliance>>> _eventAlliancesFutures = {};
   Future<List<TeamStats>>? _worldStatsFuture;
+
+  double winProbScale = 20;
+  final Map<String, Future<Map<String, double>>> _liveRatingFutures = {};
+  final Map<String, DateTime> _liveRatingTimes = {};
+  final Expando<double> _meanCache = Expando<double>();
+  final Expando<int> _meanCacheSize = Expando<int>();
 
   bool isLoading = true;
 
@@ -300,6 +307,9 @@ class MatchDataController extends ChangeNotifier {
     final worldStatsFuture = loadWorldTeamStats().catchError(
       (_) => <TeamStats>[],
     );
+    final liveRatingsFuture = loadLiveEventRatings(
+      t.selectedEventKey!,
+    ).catchError((_) => <String, double>{});
 
     try {
       final uri = Uri.parse(
@@ -338,13 +348,16 @@ class MatchDataController extends ChangeNotifier {
         (k, v) => MapEntry(k, (v as num).toDouble()),
       );
       final worldStats = await worldStatsFuture;
+      final liveRatings = await liveRatingsFuture;
 
       t.matches = loadedMatches;
       t.oprs = loadedOprs;
-      t.worldOprs = {
-        for (final s in worldStats)
-          if (s.opr != null) 'frc${s.teamNumber}': s.opr!,
-      };
+      t.worldOprs = liveRatings.isNotEmpty
+          ? liveRatings
+          : {
+              for (final s in worldStats)
+                if (s.opr != null) 'frc${s.teamNumber}': s.opr!,
+            };
       t.myStatus = TeamStatus.fromJson(data['status'] as Map<String, dynamic>?);
       t.isLoading = false;
       notifyListeners();
@@ -400,12 +413,29 @@ class MatchDataController extends ChangeNotifier {
   ) {
     if (oprs.isEmpty) return null;
     double sum(List<String> teamKeys) =>
-        teamKeys.fold(0.0, (s, k) => s + (oprs[k] ?? 0));
+        teamKeys.fold(0.0, (s, k) => s + ratingOf(oprs, k));
     final a = sum(allianceA);
     final b = sum(allianceB);
     if (a == 0 && b == 0) return null;
-    final raw = a / (a + b);
-    return raw.clamp(0.01, 0.99);
+    return winProbabilityFromTotals(a, b);
+  }
+
+  double winProbabilityFromTotals(double a, double b) {
+    final p = 1 / (1 + math.exp(-(a - b) / winProbScale));
+    return p.clamp(0.01, 0.99);
+  }
+
+  double ratingOf(Map<String, double> ratings, String teamKey) =>
+      ratings[teamKey] ?? _meanRating(ratings);
+
+  double _meanRating(Map<String, double> ratings) {
+    if (ratings.isEmpty) return 0;
+    final cached = _meanCache[ratings];
+    if (cached != null && _meanCacheSize[ratings] == ratings.length) return cached;
+    final mean = ratings.values.fold(0.0, (s, v) => s + v) / ratings.length;
+    _meanCache[ratings] = mean;
+    _meanCacheSize[ratings] = ratings.length;
+    return mean;
   }
 
   List<String> suggestionsFor(
@@ -419,7 +449,7 @@ class MatchDataController extends ChangeNotifier {
     final myAllianceKeys = onRed ? m.redTeams : m.blueTeams;
     final oppAllianceKeys = onRed ? m.blueTeams : m.redTeams;
     double allianceScore(List<String> keys) =>
-        keys.fold(0.0, (s, k) => s + (t.worldOprs[k] ?? 0));
+        keys.fold(0.0, (s, k) => s + ratingOf(t.worldOprs, k));
     final myScore = allianceScore(myAllianceKeys);
     final oppScore = allianceScore(oppAllianceKeys);
     if (t.worldOprs.isNotEmpty && (myScore > 0 || oppScore > 0)) {
@@ -732,6 +762,36 @@ class MatchDataController extends ChangeNotifier {
     });
   }
 
+  Future<Map<String, double>> loadLiveEventRatings(
+    String eventKey, {
+    bool forceRefresh = false,
+  }) {
+    final at = _liveRatingTimes[eventKey];
+    final fresh = at != null &&
+        DateTime.now().difference(at) < const Duration(seconds: 45);
+    if (!forceRefresh && fresh && _liveRatingFutures[eventKey] != null) {
+      return _liveRatingFutures[eventKey]!;
+    }
+    final future = () async {
+      final uri = Uri.parse('$backendBase/event/ratings?eventKey=$eventKey');
+      final res = await http.get(uri).timeout(const Duration(seconds: 20));
+      if (res.statusCode != 200) throw StateError('ratings unavailable');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final scale = (data['scale'] as num?)?.toDouble();
+      if (scale != null && scale > 0) winProbScale = scale;
+      final raw = data['ratings'] as Map<String, dynamic>? ?? {};
+      return raw.map((k, v) => MapEntry(k, (v as num).toDouble()));
+    }();
+    _liveRatingFutures[eventKey] = future;
+    _liveRatingTimes[eventKey] = DateTime.now();
+    future.catchError((_) {
+      _liveRatingFutures.remove(eventKey);
+      _liveRatingTimes.remove(eventKey);
+      return <String, double>{};
+    });
+    return future;
+  }
+
   Future<List<TeamStats>> loadWorldTeamStats({bool forceRefresh = false}) {
     if (forceRefresh) _worldStatsFuture = null;
     const cacheKey = 'world_stats';
@@ -749,6 +809,8 @@ class MatchDataController extends ChangeNotifier {
           throw StateError(message);
         }
         final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final scale = (data['winProbScale'] as num?)?.toDouble();
+        if (scale != null && scale > 0) winProbScale = scale;
         final rawList = data['teams'] as List<dynamic>? ?? [];
         await _cacheRawJson(cacheKey, rawList);
         return parse(rawList);
