@@ -330,12 +330,40 @@ class TeamProfile {
   }
 }
 
+class AccuracyBreakdownRow {
+  final String group;
+  final String label;
+  final int games;
+  final double accuracyPct;
+
+  const AccuracyBreakdownRow({
+    required this.group,
+    required this.label,
+    required this.games,
+    required this.accuracyPct,
+  });
+
+  factory AccuracyBreakdownRow.fromJson(Map<String, dynamic> json) {
+    return AccuracyBreakdownRow(
+      group: json['group'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      games: (json['games'] as num?)?.toInt() ?? 0,
+      accuracyPct: (json['accuracyPct'] as num?)?.toDouble() ?? 0,
+    );
+  }
+}
+
 class ModelAccuracy {
   final int games;
   final int correct;
   final int eventsCounted;
   final double? accuracyPct;
   final double? avgMarginError;
+  final double? logLoss;
+  final double? brier;
+  final String gradedOn;
+  final double? tunedAccuracyPct;
+  final List<AccuracyBreakdownRow> breakdown;
   final DateTime? refreshedAt;
 
   const ModelAccuracy({
@@ -345,6 +373,11 @@ class ModelAccuracy {
     required this.accuracyPct,
     required this.avgMarginError,
     required this.refreshedAt,
+    this.logLoss,
+    this.brier,
+    this.gradedOn = 'all',
+    this.tunedAccuracyPct,
+    this.breakdown = const [],
   });
 
   factory ModelAccuracy.fromJson(Map<String, dynamic> json) {
@@ -354,6 +387,13 @@ class ModelAccuracy {
       eventsCounted: (json['eventsCounted'] as num?)?.toInt() ?? 0,
       accuracyPct: (json['accuracyPct'] as num?)?.toDouble(),
       avgMarginError: (json['avgMarginError'] as num?)?.toDouble(),
+      logLoss: (json['logLoss'] as num?)?.toDouble(),
+      brier: (json['brier'] as num?)?.toDouble(),
+      gradedOn: json['gradedOn'] as String? ?? 'all',
+      tunedAccuracyPct: (json['tunedAccuracyPct'] as num?)?.toDouble(),
+      breakdown: (json['breakdown'] as List<dynamic>? ?? [])
+          .map((r) => AccuracyBreakdownRow.fromJson(r as Map<String, dynamic>))
+          .toList(),
       refreshedAt: json['refreshedAt'] != null
           ? DateTime.tryParse(json['refreshedAt'] as String)
           : null,

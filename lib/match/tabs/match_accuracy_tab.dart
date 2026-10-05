@@ -147,10 +147,39 @@ class _MatchAccuracyTabState extends State<MatchAccuracyTab> {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _smallCard(
+                label: 'Log loss',
+                value: a.logLoss?.toStringAsFixed(3) ?? '-',
+                caption: 'lower is better, 0.693 is a coin flip',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _smallCard(
+                label: 'Brier score',
+                value: a.brier?.toStringAsFixed(3) ?? '-',
+                caption: 'lower is better, 0.25 is a coin flip',
+              ),
+            ),
+          ],
+        ),
+        ..._breakdown(a.breakdown),
         const SizedBox(height: 16),
         Text(
+          a.gradedOn == 'holdout'
+              ? 'Scores above come from events the settings were not tuned on, so they are an honest estimate.'
+                  '${a.tunedAccuracyPct != null ? ' On the events used for tuning the model scores ${a.tunedAccuracyPct!.toStringAsFixed(1)}%.' : ''}'
+              : 'Not enough events yet to hold some back, so these scores include the events used for tuning.',
+          style: TextStyle(fontSize: 11, height: 1.5, color: Colors.grey[500]),
+        ),
+        const SizedBox(height: 8),
+        Text(
           'Each match is predicted the way the app does it: add up every team\u2019s rating on each alliance and pick the higher total. '
-          'A team starts each event with its rating from earlier events (recent ones count more), then its rating updates after every match, ignoring foul points. '
+          'A team starts each event with its rating from earlier events (recent ones count more, last season fills in for new teams), then its rating updates after every match, ignoring foul points. '
           'A match is always predicted before its result is learned, so the model never sees the answer it is graded on. '
           'Ties are skipped.',
           style: TextStyle(fontSize: 11, height: 1.5, color: Colors.grey[500]),
@@ -164,6 +193,77 @@ class _MatchAccuracyTabState extends State<MatchAccuracyTab> {
         ],
       ],
     ];
+  }
+
+  List<Widget> _breakdown(List<AccuracyBreakdownRow> rows) {
+    if (rows.isEmpty) return [];
+    final groups = <String, List<AccuracyBreakdownRow>>{};
+    for (final r in rows) {
+      groups.putIfAbsent(r.group, () => []).add(r);
+    }
+    return [
+      const SizedBox(height: 20),
+      const Text(
+        'Where it is right and wrong',
+        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(height: 8),
+      for (final entry in groups.entries) _breakdownCard(entry.key, entry.value),
+    ];
+  }
+
+  Widget _breakdownCard(String title, List<AccuracyBreakdownRow> rows) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[600],
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final r in rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(r.label, style: const TextStyle(fontSize: 13)),
+                  ),
+                  Text(
+                    '${r.games} matches',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 48,
+                    child: Text(
+                      '${r.accuracyPct.toStringAsFixed(1)}%',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: MatchColors.yellorDark,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _bigCard({

@@ -1711,7 +1711,7 @@ app.get('/event/stats', async (req, res) => {
 });
 
 const WORLD_RATING_CACHE_MS = 12 * 60 * 60 * 1000;
-const RATING_MODEL_VERSION = 2;
+const RATING_MODEL_VERSION = 3;
 
 async function mapWithConcurrency(items, limit, work) {
   const results = [];
@@ -1731,13 +1731,34 @@ async function mapWithConcurrency(items, limit, work) {
 }
 
 const FOREVER_DAYS = 1e9;
-const DEFAULT_RATING_PARAMS = { lr: 0.15, lrPlayoff: 0.08, halfLifeDays: 60, priorWeight: 3 };
+const DEFAULT_RATING_PARAMS = {
+  mode: 'online',
+  lr: 0.15,
+  playoffFactor: 0.5,
+  lrDecayMatches: FOREVER_DAYS,
+  halfLifeDays: 60,
+  priorWeight: 3,
+  carry: 0,
+  defense: 0,
+  ridgeLambda: 5,
+};
 const TUNING_GRID = {
-  lr: [0.05, 0.1, 0.15, 0.25],
-  playoffFactor: [0.5, 1],
+  mode: ['online', 'ridge'],
   halfLifeDays: [30, 60, 120, FOREVER_DAYS],
   priorWeight: [1, 3, 8],
+  carry: [0, 0.5, 1],
+  playoffFactor: [0.5, 1],
+  lr: [0.05, 0.1, 0.15, 0.25, 0.4],
+  lrDecayMatches: [4, 8, 16, FOREVER_DAYS],
+  defense: [0, 0.3, 0.6],
+  ridgeLambda: [2, 5, 12],
 };
+const ONLINE_ONLY_PARAMS = new Set(['lr', 'lrDecayMatches', 'defense']);
+const RIDGE_ONLY_PARAMS = new Set(['ridgeLambda']);
+const RIDGE_REFIT_EVERY = 3;
+const MIN_TUNING_GAMES = 200;
+const MIN_HOLDOUT_GAMES = 300;
+const PRIOR_SEASON_VERSION = 1;
 const DEFAULT_WIN_PROB_SCALE = 20;
 const WIN_PROB_SCALE_CANDIDATES = [4, 6, 8, 10, 12, 15, 18, 22, 26, 32, 40, 50, 65, 80, 100, 130];
 const LEVEL_ORDER = { p: 0, qm: 1, ef: 2, qf: 3, sf: 4, f: 5 };
@@ -1747,6 +1768,12 @@ const LIVE_RATINGS_TTL_MS = 60 * 1000;
 function winProbability(margin, scale) {
   const s = scale > 0 ? scale : DEFAULT_WIN_PROB_SCALE;
   return 1 / (1 + Math.exp(-margin / s));
+}
+
+function hashString(text) {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+  return h;
 }
 
 function ownPoints(match, color) {
@@ -1773,64 +1800,170 @@ function slimMatch(m) {
   };
 }
 
-function replayEvent(matches, priorFn, meanFn, params, preds) {
+function solveSPD(matrix, rhs, n) {
+  const L = new Float64Array(n * n);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      let sum = matrix[i * n + j];
+      for (let k = 0; k < j; k++) sum -= L[i * n + k] * L[j * n + k];
+      if (i === j) L[i * n + i] = Math.sqrt(Math.max(sum, 1e-9));
+      else L[i * n + j] = sum / L[j * n + j];
+    }
+  }
+  const y = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = rhs[i];
+    for (let k = 0; k < i; k++) sum -= L[i * n + k] * y[k];
+    y[i] = sum / L[i * n + i];
+  }
+  const x = new Float64Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    let sum = y[i];
+    for (let k = i + 1; k < n; k++) sum -= L[k * n + i] * x[k];
+    x[i] = sum / L[i * n + i];
+  }
+  return x;
+}
+
+function seasonPrior(teamKey, base, params, prev) {
+  if (!prev || !(base > 0) || !(params.carry > 0)) return null;
+  const z = prev.z[teamKey.replace(/^frc/, '')];
+  if (z === undefined) return null;
+  return Math.max(0.2 * base, base * (1 + params.carry * prev.cv * z));
+}
+
+function replayEvent(matches, priorFn, meanFn, params, hooks) {
   const live = new Map();
   const played = new Map();
+  const defense = new Map();
+  const hasPrior = new Set();
+  const ridge = params.mode === 'ridge';
+  const lrPlayoff = params.lr * params.playoffFactor;
+  const qualCount = matches.filter((m) => m.level === 'qm').length || 1;
   let eventPoints = 0;
   let eventSlots = 0;
   let playoffShift = 0;
   let playoffCount = 0;
   const out = { games: 0, correct: 0, marginErr: 0, ratings: live, played };
 
+  const baseNow = () => {
+    const mean = meanFn();
+    return mean > 0 ? mean : (eventSlots > 0 ? eventPoints / eventSlots : 0);
+  };
+  const startingRating = (teamKey) => {
+    const base = baseNow();
+    const prior = priorFn(teamKey, base);
+    if (prior !== null && prior !== undefined) {
+      hasPrior.add(teamKey);
+      return prior;
+    }
+    return base;
+  };
   const ratingFor = (teamKey) => {
     if (live.has(teamKey)) return live.get(teamKey);
-    const prior = priorFn(teamKey);
-    let rating;
-    if (prior !== null && prior !== undefined) rating = prior;
-    else {
-      const mean = meanFn();
-      rating = mean > 0 ? mean : (eventSlots > 0 ? eventPoints / eventSlots : 0);
-    }
+    const rating = startingRating(teamKey);
     live.set(teamKey, rating);
     return rating;
   };
   const sumOf = (keys) => keys.reduce((total, key) => total + ratingFor(key), 0);
+  const defenseOf = (keys) => keys.reduce((total, key) => total + (defense.get(key) || 0), 0);
+
+  let teamIndex = null;
+  let normal = null;
+  let target = null;
+  let teamCount = 0;
+  let dirty = false;
+  let sinceSolve = 0;
+  const solve = () => {
+    if (teamCount === 0) return;
+    const system = Float64Array.from(normal);
+    const rhs = new Float64Array(teamCount);
+    for (const [teamKey, i] of teamIndex) {
+      system[i * teamCount + i] += params.ridgeLambda;
+      rhs[i] = target[i] + params.ridgeLambda * startingRating(teamKey);
+    }
+    const x = solveSPD(system, rhs, teamCount);
+    for (const [teamKey, i] of teamIndex) live.set(teamKey, x[i]);
+    dirty = false;
+    sinceSolve = 0;
+  };
+  if (ridge) {
+    teamIndex = new Map();
+    for (const m of matches) {
+      for (const key of [...m.red, ...m.blue]) if (!teamIndex.has(key)) teamIndex.set(key, teamIndex.size);
+    }
+    teamCount = teamIndex.size;
+    normal = new Float64Array(teamCount * teamCount);
+    target = new Float64Array(teamCount);
+    solve();
+  }
 
   const ordered = [...matches].sort((a, b) =>
     ((LEVEL_ORDER[a.level] ?? 9) - (LEVEL_ORDER[b.level] ?? 9)) || (a.set - b.set) || (a.num - b.num));
 
   for (const m of ordered) {
     if (m.redScore === null || m.blueScore === null || m.level === 'p') continue;
-    const redSum = sumOf(m.red);
-    const blueSum = sumOf(m.blue);
+    if (ridge && dirty && sinceSolve >= RIDGE_REFIT_EVERY) solve();
 
-    if (m.redScore !== m.blueScore && redSum !== blueSum) {
-      out.games += 1;
+    const redPred = sumOf(m.red) - defenseOf(m.blue);
+    const bluePred = sumOf(m.blue) - defenseOf(m.red);
+
+    if (m.redScore !== m.blueScore && redPred !== bluePred) {
       const redWon = m.redScore > m.blueScore;
-      if ((redSum > blueSum) === redWon) out.correct += 1;
-      out.marginErr += Math.abs((redSum - blueSum) - (m.redScore - m.blueScore));
-      if (preds) preds.push(redSum - blueSum, redWon ? 1 : 0);
+      const correct = (redPred > bluePred) === redWon;
+      out.games += 1;
+      if (correct) out.correct += 1;
+      out.marginErr += Math.abs((redPred - bluePred) - (m.redScore - m.blueScore));
+      if (hooks?.preds) hooks.preds.push(redPred - bluePred, redWon ? 1 : 0);
+      if (hooks?.onGame) {
+        const unseen = [...m.red, ...m.blue].filter((key) => !hasPrior.has(key)).length;
+        hooks.onGame({
+          level: m.level, num: m.num, qualCount, correct,
+          margin: redPred - bluePred, avg: (redPred + bluePred) / 2, unseen,
+        });
+      }
     }
 
     const playoff = m.level !== 'qm';
-    const lr = playoff ? params.lrPlayoff : params.lr;
+    const baseLr = playoff ? lrPlayoff : params.lr;
     const sides = [
-      { keys: m.red, sum: redSum, own: m.redOwn },
-      { keys: m.blue, sum: blueSum, own: m.blueOwn },
+      { keys: m.red, opp: m.blue, own: m.redOwn, pred: redPred },
+      { keys: m.blue, opp: m.red, own: m.blueOwn, pred: bluePred },
     ];
     const rawErrors = [];
     for (const side of sides) {
       const own = side.own ?? 0;
-      const rawErr = own - side.sum;
+      const rawErr = own - side.pred;
       rawErrors.push(rawErr);
       const err = playoff ? rawErr - playoffShift : rawErr;
-      const share = lr * err / Math.max(1, side.keys.length);
-      for (const key of side.keys) {
-        live.set(key, ratingFor(key) + share);
-        played.set(key, (played.get(key) || 0) + 1);
+      const size = Math.max(1, side.keys.length);
+      if (ridge) {
+        const weight = playoff ? params.playoffFactor : 1;
+        const y = own - (playoff ? playoffShift : 0);
+        for (const a of side.keys) {
+          const i = teamIndex.get(a);
+          target[i] += weight * y;
+          for (const b of side.keys) normal[i * teamCount + teamIndex.get(b)] += weight;
+        }
+      } else {
+        for (const key of side.keys) {
+          const seen = played.get(key) || 0;
+          const lr = Math.max(baseLr * 0.2, baseLr / (1 + seen / params.lrDecayMatches));
+          live.set(key, ratingFor(key) + lr * err / size);
+          if (params.defense > 0) {
+            for (const oppKey of side.opp) {
+              defense.set(oppKey, (defense.get(oppKey) || 0) - lr * params.defense * err / (size * size));
+            }
+          }
+        }
       }
+      for (const key of side.keys) played.set(key, (played.get(key) || 0) + 1);
       eventPoints += own;
       eventSlots += side.keys.length;
+    }
+    if (ridge) {
+      dirty = true;
+      sinceSolve += 1;
     }
     if (playoff) {
       for (const e of rawErrors) {
@@ -1839,6 +1972,7 @@ function replayEvent(matches, priorFn, meanFn, params, preds) {
       }
     }
   }
+  if (ridge && dirty) solve();
   return out;
 }
 
@@ -1854,13 +1988,17 @@ function decayedHistory(hist, refMs, halfLifeDays) {
   return { s, w };
 }
 
-function runSeasonModel(eventData, params, collectPreds) {
+function runSeasonModel(eventData, params, options = {}) {
+  const { prev = null, isHoldout = null, collect = false, onGame = null } = options;
   const ordered = [...eventData].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+  const firstStart = ordered.length ? ordered[0].startMs : 0;
   const history = new Map();
-  const preds = collectPreds ? [] : null;
-  const total = { games: 0, correct: 0, marginErr: 0, eventsCounted: 0 };
+  const makeTally = () => ({ games: 0, correct: 0, marginErr: 0, events: 0, preds: collect ? [] : null });
+  const tune = makeTally();
+  const hold = makeTally();
 
   for (const d of ordered) {
+    const tally = isHoldout && isHoldout(d) ? hold : tune;
     const priors = new Map();
     let meanSum = 0;
     for (const [teamKey, hist] of history) {
@@ -1868,16 +2006,22 @@ function runSeasonModel(eventData, params, collectPreds) {
       if (w > 0) { priors.set(teamKey, { s, w }); meanSum += s / w; }
     }
     const mean = priors.size ? meanSum / priors.size : 0;
-    const priorFn = (teamKey) => {
+    const priorFn = (teamKey, base) => {
       const p = priors.get(teamKey);
-      return p ? (p.s + mean * params.priorWeight) / (p.w + params.priorWeight) : null;
+      const seasonal = seasonPrior(teamKey, base, params, prev);
+      if (p) return (p.s + (seasonal ?? mean) * params.priorWeight) / (p.w + params.priorWeight);
+      return seasonal;
     };
+    const week = Math.floor((d.startMs - firstStart) / (7 * MS_PER_DAY)) + 1;
 
-    const res = replayEvent(d.matches, priorFn, () => mean, params, preds);
-    total.games += res.games;
-    total.correct += res.correct;
-    total.marginErr += res.marginErr;
-    if (res.games > 0) total.eventsCounted += 1;
+    const res = replayEvent(d.matches, priorFn, () => mean, params, {
+      preds: tally.preds,
+      onGame: onGame ? (g) => onGame({ ...g, week }) : null,
+    });
+    tally.games += res.games;
+    tally.correct += res.correct;
+    tally.marginErr += res.marginErr;
+    if (res.games > 0) tally.events += 1;
 
     const seen = new Set();
     for (const [teamKey, count] of res.played) {
@@ -1891,34 +2035,12 @@ function runSeasonModel(eventData, params, collectPreds) {
       history.get(row.teamKey).push({ endMs: d.endMs, rating: row.opr, weight: row.weight });
     }
   }
-  return { history, preds, ...total };
-}
-
-function accuracyScore(run) {
-  return run.games > 0 ? run.correct / run.games : -1;
-}
-
-async function tuneRatingParams(eventData) {
-  let best = null;
-  for (const lr of TUNING_GRID.lr) {
-    for (const playoffFactor of TUNING_GRID.playoffFactor) {
-      for (const halfLifeDays of TUNING_GRID.halfLifeDays) {
-        for (const priorWeight of TUNING_GRID.priorWeight) {
-          const params = { lr, lrPlayoff: Number((lr * playoffFactor).toFixed(4)), halfLifeDays, priorWeight };
-          const run = runSeasonModel(eventData, params, false);
-          const acc = accuracyScore(run);
-          const err = run.games > 0 ? run.marginErr / run.games : Infinity;
-          if (!best || acc > best.acc || (acc === best.acc && err < best.err)) best = { params, acc, err };
-          await new Promise((resolve) => setImmediate(resolve));
-        }
-      }
-    }
-  }
-  return best && best.acc >= 0 ? best.params : DEFAULT_RATING_PARAMS;
+  return { history, tune, hold };
 }
 
 function fitWinProbScale(preds) {
-  if (!preds || preds.length < 200) return DEFAULT_WIN_PROB_SCALE;
+  const n = preds ? preds.length / 2 : 0;
+  if (n < 50) return { scale: DEFAULT_WIN_PROB_SCALE, loss: Infinity };
   let bestScale = DEFAULT_WIN_PROB_SCALE;
   let bestLoss = Infinity;
   for (const scale of WIN_PROB_SCALE_CANDIDATES) {
@@ -1929,7 +2051,152 @@ function fitWinProbScale(preds) {
     }
     if (loss < bestLoss) { bestLoss = loss; bestScale = scale; }
   }
-  return bestScale;
+  return { scale: bestScale, loss: bestLoss / n };
+}
+
+function scorePreds(preds, scale) {
+  const n = preds ? preds.length / 2 : 0;
+  if (n === 0) return { logLoss: null, brier: null };
+  let loss = 0;
+  let brier = 0;
+  for (let i = 0; i < preds.length; i += 2) {
+    const p = Math.min(0.999, Math.max(0.001, winProbability(preds[i], scale)));
+    const y = preds[i + 1];
+    loss -= y ? Math.log(p) : Math.log(1 - p);
+    brier += (p - y) * (p - y);
+  }
+  return { logLoss: Number((loss / n).toFixed(4)), brier: Number((brier / n).toFixed(4)) };
+}
+
+function combineTallies(a, b) {
+  return {
+    games: a.games + b.games,
+    correct: a.correct + b.correct,
+    marginErr: a.marginErr + b.marginErr,
+    events: a.events + b.events,
+    preds: a.preds && b.preds ? a.preds.concat(b.preds) : null,
+  };
+}
+
+async function tuneRatingParams(eventData, prev, isHoldout) {
+  const memo = new Map();
+  const evaluate = async (params) => {
+    const key = JSON.stringify(params);
+    if (memo.has(key)) return memo.get(key);
+    const run = runSeasonModel(eventData, params, { prev, isHoldout, collect: true });
+    const result = {
+      params,
+      games: run.tune.games,
+      loss: fitWinProbScale(run.tune.preds).loss,
+    };
+    memo.set(key, result);
+    await new Promise((resolve) => setImmediate(resolve));
+    return result;
+  };
+
+  let best = await evaluate({ ...DEFAULT_RATING_PARAMS });
+  if (best.games < MIN_TUNING_GAMES) return best.params;
+  for (let pass = 0; pass < 2; pass++) {
+    let improved = false;
+    for (const key of Object.keys(TUNING_GRID)) {
+      if (best.params.mode === 'ridge' && ONLINE_ONLY_PARAMS.has(key)) continue;
+      if (best.params.mode !== 'ridge' && RIDGE_ONLY_PARAMS.has(key)) continue;
+      const options = key === 'carry' && !prev ? [0] : TUNING_GRID[key];
+      for (const value of options) {
+        if (value === best.params[key]) continue;
+        const candidate = await evaluate({ ...best.params, [key]: value });
+        if (candidate.loss < best.loss - 1e-9) {
+          best = candidate;
+          improved = true;
+        }
+      }
+    }
+    if (!improved) break;
+  }
+  return best.params;
+}
+
+function createBreakdown() {
+  const groups = ['Event week', 'Stage', 'Qual progress', 'Predicted gap', 'Teams without history'];
+  const rows = new Map();
+  const add = (group, label, order, correct) => {
+    const key = `${group}|${label}`;
+    const row = rows.get(key) || { group, label, order, games: 0, correct: 0 };
+    row.games += 1;
+    if (correct) row.correct += 1;
+    rows.set(key, row);
+  };
+  return {
+    record(g) {
+      add('Event week', `Week ${g.week}`, g.week, g.correct);
+      add('Stage', g.level === 'qm' ? 'Qualifications' : 'Playoffs', g.level === 'qm' ? 0 : 1, g.correct);
+      if (g.level === 'qm') {
+        const fraction = g.num / g.qualCount;
+        const idx = fraction <= 1 / 3 ? 0 : fraction <= 2 / 3 ? 1 : 2;
+        add('Qual progress', ['First third', 'Middle third', 'Last third'][idx], idx, g.correct);
+      }
+      const gap = g.avg > 0 ? Math.abs(g.margin) / g.avg : 0;
+      const gapIdx = gap < 0.05 ? 0 : gap < 0.15 ? 1 : gap < 0.3 ? 2 : 3;
+      add('Predicted gap', ['Under 5%', '5-15%', '15-30%', 'Over 30%'][gapIdx], gapIdx, g.correct);
+      const unseenIdx = g.unseen === 0 ? 0 : g.unseen <= 2 ? 1 : 2;
+      add('Teams without history', ['None', '1-2 teams', '3+ teams'][unseenIdx], unseenIdx, g.correct);
+    },
+    rows() {
+      return [...rows.values()]
+        .filter((row) => row.games >= 10)
+        .sort((a, b) => groups.indexOf(a.group) - groups.indexOf(b.group) || a.order - b.order)
+        .map((row) => ({
+          group: row.group,
+          label: row.label,
+          games: row.games,
+          accuracyPct: Number(((row.correct / row.games) * 100).toFixed(1)),
+        }));
+    },
+  };
+}
+
+function eventSeasonData(event, rows, rawMatches) {
+  return {
+    event,
+    rows,
+    matches: (Array.isArray(rawMatches) ? rawMatches : []).map(slimMatch),
+    startMs: Date.parse(`${event.start_date}T00:00:00Z`),
+    endMs: Date.parse(`${event.end_date}T23:59:59Z`),
+  };
+}
+
+async function loadPreviousSeason(year) {
+  const id = `priorSeason_${year - 1}`;
+  const cached = await worldRatingsCollection.findOne({ _id: id });
+  if (cached && cached.version === PRIOR_SEASON_VERSION) return cached;
+
+  const events = await tbaGet(`/events/${year - 1}/simple`);
+  const official = events.filter((event) =>
+    [0, 1, 2, 3, 4].includes(event.event_type) && event.start_date && event.end_date);
+  const eventData = await mapWithConcurrency(official, 6, async (event) =>
+    eventSeasonData(event, [], await tbaGet(`/event/${event.key}/matches`)));
+  if (eventData.length === 0) return null;
+
+  const run = runSeasonModel(eventData, { ...DEFAULT_RATING_PARAMS }, {});
+  const refMs = eventData.reduce((latest, d) => Math.max(latest, d.endMs), 0) + MS_PER_DAY;
+  const ratings = [];
+  for (const [teamKey, hist] of run.history) {
+    const { s, w } = decayedHistory(hist, refMs, 120);
+    if (w >= 4) ratings.push([teamKey.replace(/^frc/, ''), s / w]);
+  }
+  if (ratings.length < 100) return null;
+  const mean = ratings.reduce((total, r) => total + r[1], 0) / ratings.length;
+  const sd = Math.sqrt(ratings.reduce((total, r) => total + (r[1] - mean) ** 2, 0) / ratings.length);
+  if (!(mean > 0) || !(sd > 0)) return null;
+
+  const z = {};
+  for (const [number, rating] of ratings) z[number] = Number(((rating - mean) / sd).toFixed(3));
+  const doc = {
+    _id: id, version: PRIOR_SEASON_VERSION, year: year - 1, z,
+    cv: Number((sd / mean).toFixed(4)), refreshedAt: new Date(),
+  };
+  await worldRatingsCollection.replaceOne({ _id: id }, doc, { upsert: true });
+  return doc;
 }
 
 async function rebuildWorldRatings(year) {
@@ -1945,7 +2212,6 @@ async function rebuildWorldRatings(year) {
       tbaGet(`/event/${event.key}/rankings`).catch(() => ({ rankings: [] })),
       tbaGet(`/event/${event.key}/matches`).catch(() => []),
     ]);
-    const matches = (Array.isArray(rawMatches) ? rawMatches : []).map(slimMatch);
     const names = new Map(teams.map((team) => [team.key, team.nickname || `Team ${team.team_number}`]));
     const records = new Map((rankings.rankings || []).map((r) => [r.team_key, r.record || {}]));
     const rows = Object.entries(oprData.oprs || {}).map(([teamKey, rawOpr]) => {
@@ -1955,16 +2221,26 @@ async function rebuildWorldRatings(year) {
         opr: Number(rawOpr || 0), weight: Math.max(1, playedCount),
         wins: record.wins || 0, losses: record.losses || 0, ties: record.ties || 0 };
     });
-    return {
-      event, rows, matches,
-      startMs: Date.parse(`${event.start_date}T00:00:00Z`),
-      endMs: Date.parse(`${event.end_date}T23:59:59Z`),
-    };
+    return eventSeasonData(event, rows, rawMatches);
   });
 
-  const params = await tuneRatingParams(eventData);
-  const run = runSeasonModel(eventData, params, true);
-  const winProbScale = fitWinProbScale(run.preds);
+  const prev = await loadPreviousSeason(year).catch((err) => {
+    console.warn(`Previous season prior unavailable: ${err.message}`);
+    return null;
+  });
+  const isHoldout = (d) => hashString(d.event.key) % 2 === 1;
+  const params = await tuneRatingParams(eventData, prev, isHoldout);
+  const breakdown = createBreakdown();
+  const run = runSeasonModel(eventData, params, {
+    prev, isHoldout, collect: true, onGame: (g) => breakdown.record(g),
+  });
+
+  const allPreds = run.tune.preds.concat(run.hold.preds);
+  const winProbScale = fitWinProbScale(allPreds).scale;
+  const useHoldout = run.hold.games >= MIN_HOLDOUT_GAMES;
+  const reported = useHoldout ? run.hold : combineTallies(run.tune, run.hold);
+  const reportScale = useHoldout ? fitWinProbScale(run.tune.preds).scale : winProbScale;
+  const quality = scorePreds(reported.preds, reportScale);
 
   const nowMs = Date.now();
   const decayed = new Map();
@@ -1985,9 +2261,10 @@ async function rebuildWorldRatings(year) {
   const teams = [];
   for (const [teamKey, { s, w }] of decayed) {
     const i = info.get(teamKey) || { name: `Team ${teamKey.replace(/^frc/, '')}`, wins: 0, losses: 0, ties: 0 };
+    const shrinkTarget = seasonPrior(teamKey, mean, params, prev) ?? mean;
     teams.push({
       team_number: teamKey.replace(/^frc/, ''), name: i.name,
-      opr: Number(((s + mean * params.priorWeight) / (w + params.priorWeight)).toFixed(2)),
+      opr: Number(((s + shrinkTarget * params.priorWeight) / (w + params.priorWeight)).toFixed(2)),
       weight: Number(w.toFixed(2)),
       wins: i.wins, losses: i.losses, ties: i.ties,
     });
@@ -2003,9 +2280,14 @@ async function rebuildWorldRatings(year) {
       { _id: `accuracy_${year}` },
       {
         _id: `accuracy_${year}`, year, params, winProbScale, modelVersion: RATING_MODEL_VERSION,
-        games: run.games, correct: run.correct, eventsCounted: run.eventsCounted,
-        accuracyPct: run.games > 0 ? Number(((run.correct / run.games) * 100).toFixed(1)) : null,
-        avgMarginError: run.games > 0 ? Number((run.marginErr / run.games).toFixed(1)) : null,
+        gradedOn: useHoldout ? 'holdout' : 'all',
+        games: reported.games, correct: reported.correct, eventsCounted: reported.events,
+        accuracyPct: reported.games > 0 ? Number(((reported.correct / reported.games) * 100).toFixed(1)) : null,
+        avgMarginError: reported.games > 0 ? Number((reported.marginErr / reported.games).toFixed(1)) : null,
+        logLoss: quality.logLoss, brier: quality.brier,
+        tunedGames: run.tune.games,
+        tunedAccuracyPct: run.tune.games > 0 ? Number(((run.tune.correct / run.tune.games) * 100).toFixed(1)) : null,
+        breakdown: breakdown.rows(),
         refreshedAt: new Date(),
       },
       { upsert: true },
@@ -2024,14 +2306,16 @@ async function getLiveEventRatings(eventKey) {
 
   const year = String(eventKey).slice(0, 4);
   const world = await worldRatingsCollection.findOne({ _id: year }).catch(() => null);
+  const prev = await worldRatingsCollection.findOne({ _id: `priorSeason_${Number(year) - 1}` }).catch(() => null);
   const priors = new Map((world?.teams || []).map((t) => [`frc${t.team_number}`, t.opr]));
   const mean = world?.meanRating || 0;
-  const params = world?.params || DEFAULT_RATING_PARAMS;
+  const params = { ...DEFAULT_RATING_PARAMS, ...(world?.params || {}) };
   const scale = world?.winProbScale || DEFAULT_WIN_PROB_SCALE;
 
   const rawMatches = await tbaGet(`/event/${eventKey}/matches`);
   const matches = (Array.isArray(rawMatches) ? rawMatches : []).map(slimMatch);
-  const res = replayEvent(matches, (k) => (priors.has(k) ? priors.get(k) : null), () => mean, params, null);
+  const priorFn = (key, base) => (priors.has(key) ? priors.get(key) : seasonPrior(key, base, params, prev));
+  const res = replayEvent(matches, priorFn, () => mean, params, null);
 
   const ratings = {};
   for (const m of matches) {
@@ -2100,6 +2384,11 @@ app.get('/world/accuracy', async (req, res) => {
         eventsCounted: cached.eventsCounted,
         accuracyPct: cached.accuracyPct,
         avgMarginError: cached.avgMarginError,
+        logLoss: cached.logLoss ?? null,
+        brier: cached.brier ?? null,
+        gradedOn: cached.gradedOn || 'all',
+        tunedAccuracyPct: cached.tunedAccuracyPct ?? null,
+        breakdown: cached.breakdown || [],
         refreshedAt: cached.refreshedAt,
         refreshing: stale,
         params: cached.params || null,
