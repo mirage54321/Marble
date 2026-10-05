@@ -1711,6 +1711,7 @@ app.get('/event/stats', async (req, res) => {
 });
 
 const WORLD_RATING_CACHE_MS = 12 * 60 * 60 * 1000;
+const RATING_MODEL_VERSION = 2;
 
 async function mapWithConcurrency(items, limit, work) {
   const results = [];
@@ -1995,13 +1996,13 @@ async function rebuildWorldRatings(year) {
   teams.forEach((team, index) => { team.rank = index + 1; });
 
   const doc = { _id: String(year), year, teams, refreshedAt: new Date(), eventCount: official.length,
-    params, winProbScale, meanRating: Number(mean.toFixed(2)) };
+    params, winProbScale, meanRating: Number(mean.toFixed(2)), modelVersion: RATING_MODEL_VERSION };
   await worldRatingsCollection.replaceOne({ _id: doc._id }, doc, { upsert: true });
   try {
     await worldRatingsCollection.replaceOne(
       { _id: `accuracy_${year}` },
       {
-        _id: `accuracy_${year}`, year, params, winProbScale,
+        _id: `accuracy_${year}`, year, params, winProbScale, modelVersion: RATING_MODEL_VERSION,
         games: run.games, correct: run.correct, eventsCounted: run.eventsCounted,
         accuracyPct: run.games > 0 ? Number(((run.correct / run.games) * 100).toFixed(1)) : null,
         avgMarginError: run.games > 0 ? Number((run.marginErr / run.games).toFixed(1)) : null,
@@ -2061,7 +2062,7 @@ app.get('/world/stats', async (req, res) => {
   const year = Number(cleanString(req.query.year) || new Date().getFullYear());
   try {
     const cached = await worldRatingsCollection.findOne({ _id: String(year) });
-    const stale = !cached || Date.now() - new Date(cached.refreshedAt).getTime() > WORLD_RATING_CACHE_MS;
+    const stale = !cached || cached.modelVersion !== RATING_MODEL_VERSION || Date.now() - new Date(cached.refreshedAt).getTime() > WORLD_RATING_CACHE_MS;
     if (stale) startWorldRatingRefresh(year);
     if (cached) return res.json({ teams: cached.teams, year, eventCount: cached.eventCount, refreshedAt: cached.refreshedAt, refreshing: stale, winProbScale: cached.winProbScale || DEFAULT_WIN_PROB_SCALE });
     res.status(202).json({ teams: [], year, refreshing: true, message: 'World rating is being calculated. Try again shortly.' });
@@ -2089,7 +2090,7 @@ app.get('/world/accuracy', async (req, res) => {
   const year = Number(cleanString(req.query.year) || new Date().getFullYear());
   try {
     const cached = await worldRatingsCollection.findOne({ _id: `accuracy_${year}` });
-    const stale = !cached || Date.now() - new Date(cached.refreshedAt).getTime() > WORLD_RATING_CACHE_MS;
+    const stale = !cached || cached.modelVersion !== RATING_MODEL_VERSION || Date.now() - new Date(cached.refreshedAt).getTime() > WORLD_RATING_CACHE_MS;
     if (stale) startWorldRatingRefresh(year);
     if (cached) {
       return res.json({
@@ -2101,6 +2102,8 @@ app.get('/world/accuracy', async (req, res) => {
         avgMarginError: cached.avgMarginError,
         refreshedAt: cached.refreshedAt,
         refreshing: stale,
+        params: cached.params || null,
+        modelVersion: cached.modelVersion || 1,
       });
     }
     res.status(202).json({ year, refreshing: true, message: 'Accuracy is being calculated. Try again in a minute or two.' });
