@@ -1711,7 +1711,7 @@ app.get('/event/stats', async (req, res) => {
 });
 
 const WORLD_RATING_CACHE_MS = 12 * 60 * 60 * 1000;
-const RATING_MODEL_VERSION = 4;
+const RATING_MODEL_VERSION = 3;
 
 async function mapWithConcurrency(items, limit, work) {
   const results = [];
@@ -1741,25 +1741,20 @@ const DEFAULT_RATING_PARAMS = {
   carry: 0,
   defense: 0,
   ridgeLambda: 5,
-  ridgeDecay: FOREVER_DAYS,
-  blendWeight: 0.5,
-  clip: 0,
 };
 const TUNING_GRID = {
-  mode: ['online', 'ridge', 'blend'],
+  mode: ['online', 'ridge'],
   halfLifeDays: [30, 60, 120, FOREVER_DAYS],
   priorWeight: [1, 3, 8],
   carry: [0, 0.5, 1],
   playoffFactor: [0.5, 1],
-  clip: [0, 2, 3],
   lr: [0.05, 0.1, 0.15, 0.25, 0.4],
   lrDecayMatches: [4, 8, 16, FOREVER_DAYS],
   defense: [0, 0.3, 0.6],
   ridgeLambda: [2, 5, 12],
-  ridgeDecay: [40, 80, 160, FOREVER_DAYS],
-  blendWeight: [0.3, 0.5, 0.7],
 };
-const TUNING_BUDGET_MS = 4 * 60 * 1000;
+const ONLINE_ONLY_PARAMS = new Set(['lr', 'lrDecayMatches', 'defense']);
+const RIDGE_ONLY_PARAMS = new Set(['ridgeLambda']);
 const RIDGE_REFIT_EVERY = 3;
 const MIN_TUNING_GAMES = 200;
 const MIN_HOLDOUT_GAMES = 300;
@@ -1838,24 +1833,17 @@ function seasonPrior(teamKey, base, params, prev) {
 }
 
 function replayEvent(matches, priorFn, meanFn, params, hooks) {
-  const mode = params.mode;
-  const useOnline = mode !== 'ridge';
-  const useRidge = mode !== 'online';
   const live = new Map();
-  const onl = mode === 'online' ? live : new Map();
-  const rdg = mode === 'ridge' ? live : new Map();
   const played = new Map();
   const defense = new Map();
   const hasPrior = new Set();
+  const ridge = params.mode === 'ridge';
   const lrPlayoff = params.lr * params.playoffFactor;
   const qualCount = matches.filter((m) => m.level === 'qm').length || 1;
-  const decayFactor = params.ridgeDecay < 1e8 ? Math.pow(0.5, 1 / params.ridgeDecay) : 1;
   let eventPoints = 0;
   let eventSlots = 0;
   let playoffShift = 0;
   let playoffCount = 0;
-  let errSumSq = 0;
-  let errCount = 0;
   const out = { games: 0, correct: 0, marginErr: 0, ratings: live, played };
 
   const baseNow = () => {
@@ -1871,17 +1859,13 @@ function replayEvent(matches, priorFn, meanFn, params, hooks) {
     }
     return base;
   };
-  const onlineOf = (teamKey) => {
-    if (!onl.has(teamKey)) onl.set(teamKey, startingRating(teamKey));
-    return onl.get(teamKey);
-  };
-  const ridgeOf = (teamKey) => (rdg.has(teamKey) ? rdg.get(teamKey) : startingRating(teamKey));
   const ratingFor = (teamKey) => {
-    if (mode === 'online') return onlineOf(teamKey);
-    if (mode === 'ridge') return ridgeOf(teamKey);
-    return params.blendWeight * ridgeOf(teamKey) + (1 - params.blendWeight) * onlineOf(teamKey);
+    if (live.has(teamKey)) return live.get(teamKey);
+    const rating = startingRating(teamKey);
+    live.set(teamKey, rating);
+    return rating;
   };
-  const sumOf = (keys, rate) => keys.reduce((total, key) => total + rate(key), 0);
+  const sumOf = (keys) => keys.reduce((total, key) => total + ratingFor(key), 0);
   const defenseOf = (keys) => keys.reduce((total, key) => total + (defense.get(key) || 0), 0);
 
   let teamIndex = null;
@@ -1899,11 +1883,11 @@ function replayEvent(matches, priorFn, meanFn, params, hooks) {
       rhs[i] = target[i] + params.ridgeLambda * startingRating(teamKey);
     }
     const x = solveSPD(system, rhs, teamCount);
-    for (const [teamKey, i] of teamIndex) rdg.set(teamKey, x[i]);
+    for (const [teamKey, i] of teamIndex) live.set(teamKey, x[i]);
     dirty = false;
     sinceSolve = 0;
   };
-  if (useRidge) {
+  if (ridge) {
     teamIndex = new Map();
     for (const m of matches) {
       for (const key of [...m.red, ...m.blue]) if (!teamIndex.has(key)) teamIndex.set(key, teamIndex.size);
@@ -1919,10 +1903,10 @@ function replayEvent(matches, priorFn, meanFn, params, hooks) {
 
   for (const m of ordered) {
     if (m.redScore === null || m.blueScore === null || m.level === 'p') continue;
-    if (useRidge && dirty && sinceSolve >= RIDGE_REFIT_EVERY) solve();
+    if (ridge && dirty && sinceSolve >= RIDGE_REFIT_EVERY) solve();
 
-    const redPred = sumOf(m.red, ratingFor) - defenseOf(m.blue);
-    const bluePred = sumOf(m.blue, ratingFor) - defenseOf(m.red);
+    const redPred = sumOf(m.red) - defenseOf(m.blue);
+    const bluePred = sumOf(m.blue) - defenseOf(m.red);
 
     if (m.redScore !== m.blueScore && redPred !== bluePred) {
       const redWon = m.redScore > m.blueScore;
@@ -1941,15 +1925,7 @@ function replayEvent(matches, priorFn, meanFn, params, hooks) {
     }
 
     const playoff = m.level !== 'qm';
-    const shift = playoff ? playoffShift : 0;
     const baseLr = playoff ? lrPlayoff : params.lr;
-    const sigma = errCount >= 12 ? Math.sqrt(errSumSq / errCount) : null;
-    const bound = params.clip > 0 && sigma ? params.clip * sigma : Infinity;
-    if (useRidge && decayFactor < 1) {
-      for (let i = 0; i < normal.length; i++) normal[i] *= decayFactor;
-      for (let i = 0; i < target.length; i++) target[i] *= decayFactor;
-    }
-
     const sides = [
       { keys: m.red, opp: m.blue, own: m.redOwn, pred: redPred },
       { keys: m.blue, opp: m.red, own: m.blueOwn, pred: bluePred },
@@ -1959,29 +1935,24 @@ function replayEvent(matches, priorFn, meanFn, params, hooks) {
       const own = side.own ?? 0;
       const rawErr = own - side.pred;
       rawErrors.push(rawErr);
+      const err = playoff ? rawErr - playoffShift : rawErr;
       const size = Math.max(1, side.keys.length);
-      if (useRidge) {
-        const ridgePred = mode === 'ridge' ? side.pred : sumOf(side.keys, ridgeOf);
-        const ridgeErr = own - ridgePred - shift;
-        const robust = bound < Infinity ? Math.min(1, bound / Math.max(1e-9, Math.abs(ridgeErr))) : 1;
-        const weight = (playoff ? params.playoffFactor : 1) * robust;
-        const y = own - shift;
+      if (ridge) {
+        const weight = playoff ? params.playoffFactor : 1;
+        const y = own - (playoff ? playoffShift : 0);
         for (const a of side.keys) {
           const i = teamIndex.get(a);
           target[i] += weight * y;
           for (const b of side.keys) normal[i * teamCount + teamIndex.get(b)] += weight;
         }
-      }
-      if (useOnline) {
-        const onlinePred = mode === 'online' ? side.pred : sumOf(side.keys, onlineOf) - defenseOf(side.opp);
-        const onlineErr = Math.max(-bound, Math.min(bound, own - onlinePred - shift));
+      } else {
         for (const key of side.keys) {
           const seen = played.get(key) || 0;
           const lr = Math.max(baseLr * 0.2, baseLr / (1 + seen / params.lrDecayMatches));
-          onl.set(key, onlineOf(key) + lr * onlineErr / size);
+          live.set(key, ratingFor(key) + lr * err / size);
           if (params.defense > 0) {
             for (const oppKey of side.opp) {
-              defense.set(oppKey, (defense.get(oppKey) || 0) - lr * params.defense * onlineErr / (size * size));
+              defense.set(oppKey, (defense.get(oppKey) || 0) - lr * params.defense * err / (size * size));
             }
           }
         }
@@ -1989,10 +1960,8 @@ function replayEvent(matches, priorFn, meanFn, params, hooks) {
       for (const key of side.keys) played.set(key, (played.get(key) || 0) + 1);
       eventPoints += own;
       eventSlots += side.keys.length;
-      errSumSq += (rawErr - shift) * (rawErr - shift);
-      errCount += 1;
     }
-    if (useRidge) {
+    if (ridge) {
       dirty = true;
       sinceSolve += 1;
     }
@@ -2003,10 +1972,7 @@ function replayEvent(matches, priorFn, meanFn, params, hooks) {
       }
     }
   }
-  if (useRidge && dirty) solve();
-  if (mode === 'blend') {
-    for (const key of new Set([...onl.keys(), ...rdg.keys()])) live.set(key, ratingFor(key));
-  }
+  if (ridge && dirty) solve();
   return out;
 }
 
@@ -2112,16 +2078,8 @@ function combineTallies(a, b) {
   };
 }
 
-function isRelevantParam(key, mode) {
-  if (key === 'lr' || key === 'lrDecayMatches' || key === 'defense') return mode !== 'ridge';
-  if (key === 'ridgeLambda' || key === 'ridgeDecay') return mode !== 'online';
-  if (key === 'blendWeight') return mode === 'blend';
-  return true;
-}
-
 async function tuneRatingParams(eventData, prev, isHoldout) {
   const memo = new Map();
-  const deadline = Date.now() + TUNING_BUDGET_MS;
   const evaluate = async (params) => {
     const key = JSON.stringify(params);
     if (memo.has(key)) return memo.get(key);
@@ -2141,10 +2099,10 @@ async function tuneRatingParams(eventData, prev, isHoldout) {
   for (let pass = 0; pass < 2; pass++) {
     let improved = false;
     for (const key of Object.keys(TUNING_GRID)) {
-      if (!isRelevantParam(key, best.params.mode)) continue;
+      if (best.params.mode === 'ridge' && ONLINE_ONLY_PARAMS.has(key)) continue;
+      if (best.params.mode !== 'ridge' && RIDGE_ONLY_PARAMS.has(key)) continue;
       const options = key === 'carry' && !prev ? [0] : TUNING_GRID[key];
       for (const value of options) {
-        if (Date.now() > deadline) return best.params;
         if (value === best.params[key]) continue;
         const candidate = await evaluate({ ...best.params, [key]: value });
         if (candidate.loss < best.loss - 1e-9) {
