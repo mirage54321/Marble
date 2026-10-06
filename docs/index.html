@@ -90,7 +90,17 @@
       position: absolute;
       inset: 0;
       border-radius: 50%;
-      background: conic-gradient(from 0deg, rgba(0, 179, 172, 0.32), rgba(0, 179, 172, 0) 28%, transparent 100%);
+      background: conic-gradient(
+        from 0deg,
+        rgba(0, 179, 172, 0) 0deg,
+        rgba(0, 179, 172, 0.03) 8deg,
+        rgba(0, 179, 172, 0.08) 18deg,
+        rgba(0, 179, 172, 0.16) 30deg,
+        rgba(0, 179, 172, 0.28) 42deg,
+        rgba(0, 179, 172, 0.42) 50deg,
+        rgba(0, 179, 172, 0) 65deg,
+        transparent 100deg
+      );
       animation: loading-sweep-rot 2.8s linear infinite;
     }
     @keyframes loading-sweep-rot {
