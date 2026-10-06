@@ -103,24 +103,6 @@
       );
       animation: loading-sweep-rot 2.8s linear infinite;
     }
-
-    #loading .sweep::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 50%;
-      width: 2px;
-      height: 50%;
-      background: linear-gradient(
-        to bottom,
-        rgba(0, 179, 172, 0.9),
-        rgba(0, 179, 172, 0)
-      );
-      transform-origin: bottom center;
-      transform: translateX(-50%);
-      filter: drop-shadow(0 0 4px rgba(0, 179, 172, 0.5));
-    }
-
     @keyframes loading-sweep-rot {
       to { transform: rotate(360deg); }
     }
