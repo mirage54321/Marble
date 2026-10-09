@@ -1068,13 +1068,12 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Widget _list() {
-    final recommended = _localRecommended();
+    final recommended = _isGuest ? _localRecommended() : null;
     return ListView(padding: const EdgeInsets.all(16), children: [
       if (_error != null) _offlineBanner(_error!),
       if (_pending.isNotEmpty) _pendingBanner(),
-      _topPick(recommended),
-      const SizedBox(height: 10),
-      if (!_isGuest) _aiRecommendCard(),
+      // Guests can't use the AI endpoint (needs a passcode), so they keep the simple local pick.
+      if (_isGuest) _topPick(recommended!) else _aiHeader(),
       const SizedBox(height: 16),
       Text('All batteries',
           style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.grey[600])),
@@ -1086,62 +1085,123 @@ class _BatteryScreenState extends State<BatteryScreen>
     ]);
   }
 
-  Widget _aiRecommendCard() {
-    if (_loadingRecommendation) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        margin: const EdgeInsets.only(bottom: 0),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
-        ),
-        child: Row(children: const [
-          SizedBox(width: 16, height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Yellor)),
-          SizedBox(width: 10),
-          Text('Asking AI...', style: TextStyle(fontSize: 13, color: Colors.grey)),
-        ]),
-      );
-    }
-
+  Widget _aiHeader() {
+    Battery? picked;
     if (_recommendedLabel != null) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: YellorLight, borderRadius: BorderRadius.circular(14)),
-        child: Row(children: [
-          const Icon(Icons.auto_awesome, color: YellorDark, size: 18),
-          const SizedBox(width: 10),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('AI suggests $_recommendedLabel',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: YellorDark)),
-            if (_recommendReason != null)
-              Text(_recommendReason!, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
-          ])),
-          TapCursor(
-            onTap: () => setState(() { _recommendedLabel = null; _recommendReason = null; }),
-            child: Icon(Icons.close, size: 16, color: Colors.grey[500]),
+      for (final b in _batteries) {
+        if (b.label == _recommendedLabel) {
+          picked = b;
+          break;
+        }
+      }
+    }
+    final charging = picked != null && picked.isCharging && !picked.isDead;
+
+    Widget content;
+    if (_loadingRecommendation) {
+      content = Row(children: [
+        const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+        const SizedBox(width: 12),
+        Text('Asking AI...',
+            style: TextStyle(fontSize: 15, color: Colors.white.withValues(alpha: 0.9))),
+      ]);
+    } else if (_recommendedLabel != null) {
+      content = Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('AI RECOMMENDS',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white.withValues(alpha: 0.8),
+                    letterSpacing: 0.5)),
+            const SizedBox(height: 4),
+            Text(_recommendedLabel!,
+                style: const TextStyle(
+                    fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
+            if (picked != null) ...[
+              const SizedBox(height: 3),
+              Text(_statusLabel(picked),
+                  style: TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w700, color: _statusColor(picked))),
+            ],
+            if (_recommendReason != null) ...[
+              const SizedBox(height: 4),
+              Text(_recommendReason!,
+                  style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.9))),
+            ],
+            const SizedBox(height: 8),
+            TapCursor(
+              onTap: _askAiRecommendation,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.refresh, size: 14, color: Colors.white.withValues(alpha: 0.85)),
+                const SizedBox(width: 4),
+                Text('Ask again',
+                    style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.85))),
+              ]),
+            ),
+          ]),
+        ),
+        if (picked != null)
+          Column(children: [
+            TapCursor(
+              onTap: () => _toggleCharging(picked!),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                    color: charging ? greenChar : Colors.white,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Text(charging ? 'Charging' : 'Mark charging',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: charging ? Colors.white : YellorDark)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TapCursor(
+              onTap: () => _flagWeak(picked!),
+              child: Text('Flag weak',
+                  style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.85))),
+            ),
+          ]),
+      ]);
+    } else {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('WHICH BATTERY?',
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withValues(alpha: 0.8),
+                letterSpacing: 0.5)),
+        const SizedBox(height: 10),
+        TapCursor(
+          onTap: _askAiRecommendation,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration:
+                BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+            child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.auto_awesome, color: YellorDark, size: 18),
+              SizedBox(width: 8),
+              Text('Ask AI which battery to use',
+                  style: TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w600, color: YellorDark)),
+            ]),
           ),
-        ]),
-      );
+        ),
+      ]);
     }
 
-    return TapCursor(
-      onTap: _askAiRecommendation,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.1), width: 0.5),
-        ),
-        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.auto_awesome, color: YellorDark, size: 16),
-          SizedBox(width: 7),
-          Text('Ask AI which battery to use',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: YellorDark)),
-        ]),
-      ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
+      child: content,
     );
   }
 
