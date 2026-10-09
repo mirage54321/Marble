@@ -404,6 +404,7 @@ app.use(express.json({ limit: '50mb' }));
 const mongoClient = new MongoClient(MONGODB_URI);
 let teamsCollection;
 let batteriesCollection;
+let batteryTelemetryCollection;
 let pushSubscriptionsCollection;
 let notifiedMatchesCollection;
 let eventRostersCollection;
@@ -419,6 +420,7 @@ async function connectToMongo() {
   const db = mongoClient.db(DB_NAME);
   teamsCollection = db.collection('teams');
   batteriesCollection = db.collection('batteries');
+  batteryTelemetryCollection = db.collection('batteryTelemetry');
   pushSubscriptionsCollection = db.collection('pushSubscriptions');
   notifiedMatchesCollection = db.collection('notifiedMatches');
   eventRostersCollection = db.collection('eventRosters');
@@ -430,6 +432,8 @@ async function connectToMongo() {
   await teamsCollection.createIndex({ teamNumber: 1 }, { unique: true });
   await batteriesCollection.createIndex({ teamNumber: 1, label: 1 }, { unique: true });
   await batteriesCollection.createIndex({ teamNumber: 1, lastUsedAt: 1 });
+  await batteryTelemetryCollection.createIndex({ teamNumber: 1, createdAt: -1 });
+  await batteryTelemetryCollection.createIndex({ teamNumber: 1, label: 1, createdAt: -1 });
   await pushSubscriptionsCollection.createIndex({ endpoint: 1 }, { unique: true });
   await pushSubscriptionsCollection.createIndex({ teamNumber: 1, eventKey: 1 });
   await notifiedMatchesCollection.createIndex(
@@ -976,6 +980,10 @@ app.post('/battery/reset', async (req, res) => {
     if (!team) return;
 
     const result = await batteriesCollection.deleteMany({ teamNumber: team.teamNumber });
+    await teamsCollection.updateOne(
+      { teamNumber: team.teamNumber },
+      { $set: { batteryCompetitionId: new Date().toISOString() } },
+    );
     res.json({ ok: true, deletedCount: result.deletedCount });
   } catch (err) {
     console.error('Reset error:', err);
@@ -1110,6 +1118,73 @@ app.post('/battery/charging', async (req, res) => {
     res.json({ ok: true, isCharging: nextCharging });
   } catch (err) {
     console.error('Charging battery error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function optionalNonNegativeMetric(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+app.get('/battery/telemetry', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const telemetry = await batteryTelemetryCollection
+      .find({
+        teamNumber: team.teamNumber,
+        competitionId: team.batteryCompetitionId || 'legacy',
+      })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .toArray();
+    res.json({ telemetry });
+  } catch (err) {
+    console.error('Battery telemetry list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/battery/telemetry', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const label = cleanString(req.body.label);
+    if (!label) return res.status(400).json({ error: 'label is required' });
+    const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
+    if (!battery) return res.status(404).json({ error: 'Battery not found' });
+
+    const metrics = {
+      minimumVoltage: optionalNonNegativeMetric(req.body.minimumVoltage),
+      secondsBelow8Volts: optionalNonNegativeMetric(req.body.secondsBelow8Volts),
+      brownoutCount: optionalNonNegativeMetric(req.body.brownoutCount),
+      ampHoursUsed: optionalNonNegativeMetric(req.body.ampHoursUsed),
+      internalResistanceMilliohms: optionalNonNegativeMetric(req.body.internalResistanceMilliohms),
+    };
+    if (Object.values(metrics).some((value) => value === undefined)) {
+      return res.status(400).json({ error: 'Metrics must be non-negative numbers' });
+    }
+    if (Object.values(metrics).every((value) => value === null)) {
+      return res.status(400).json({ error: 'At least one metric is required' });
+    }
+
+    const telemetry = {
+      teamNumber: team.teamNumber,
+      competitionId: team.batteryCompetitionId || 'legacy',
+      label,
+      matchName: cleanString(req.body.matchName) || 'Practice',
+      ...metrics,
+      source: 'manual',
+      createdAt: new Date().toISOString(),
+    };
+    await batteryTelemetryCollection.insertOne(telemetry);
+    res.json({ ok: true, telemetry });
+  } catch (err) {
+    console.error('Battery telemetry save error:', err);
     res.status(500).json({ error: err.message });
   }
 });

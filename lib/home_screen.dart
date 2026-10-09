@@ -4,8 +4,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'constants.dart';
 import 'scan_screen.dart';
 import 'rules_screen.dart';
-import 'battery_screen.dart';
 import 'batteryLOGIN_screen.dart';
+import 'battery_match_logs_screen.dart';
 import 'match_notifier_screen.dart';
 
 // flutter run -d web-server --web-hostname 0.0.0.0 --web-port 8080
@@ -40,12 +40,21 @@ class HomeScreen extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Text('Report an error',
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+                    const Text(
+                      'Report an error',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const Spacer(),
                     TapCursor(
                       onTap: () => Navigator.pop(ctx),
-                      child: Icon(Icons.close, color: Colors.grey[400], size: 20),
+                      child: Icon(
+                        Icons.close,
+                        color: Colors.grey[400],
+                        size: 20,
+                      ),
                     ),
                   ],
                 ),
@@ -53,7 +62,11 @@ class HomeScreen extends StatelessWidget {
                 Text(
                   'Tell us what happened. This opens your mail app with the '
                   'details filled in so you can send it straight to us.',
-                  style: TextStyle(fontSize: 12.5, color: Colors.grey[600], height: 1.4),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: Colors.grey[600],
+                    height: 1.4,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -93,8 +106,13 @@ class HomeScreen extends StatelessWidget {
                       ),
                       elevation: 0,
                     ),
-                    child: const Text('Send report',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                    child: const Text(
+                      'Send report',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -104,7 +122,6 @@ class HomeScreen extends StatelessWidget {
       ),
     );
   }
-
 
   Future<void> _launchReportEmail(String description) async {
     final body = description.isEmpty
@@ -139,6 +156,7 @@ class HomeScreen extends StatelessWidget {
                         scanner(context),
                         rules(context),
                         battery(context),
+                        batteryMatchLogs(context),
                         stats(context),
                         const SizedBox(height: 24),
                         const SizedBox(height: 16),
@@ -155,7 +173,10 @@ class HomeScreen extends StatelessWidget {
               child: TapCursor(
                 onTap: () => _showReportDialog(context),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
@@ -171,14 +192,19 @@ class HomeScreen extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.flag_outlined, size: 14, color: Colors.grey[600]),
+                      Icon(
+                        Icons.flag_outlined,
+                        size: 14,
+                        color: Colors.grey[600],
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         'Report',
                         style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.grey[700]),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.grey[700],
+                        ),
                       ),
                     ],
                   ),
@@ -195,40 +221,40 @@ class HomeScreen extends StatelessWidget {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-    //   child: Row(
-    //     children: [
-    //       Container(
-    //         width: 32,
-    //         height: 32,
-    //         decoration: BoxDecoration(
-    //           color: grayConstant,
-    //           borderRadius: BorderRadius.circular(10),
-    //         ),
-    //         clipBehavior: Clip.antiAlias,
-    //         child: Image.asset(
-    //           'web/icons/Icon-111.png',
-    //           fit: BoxFit.cover,
-    //         ),
-    //       ),
-    //       const SizedBox(width: 8),
-    //       RichText(
-    //         text: const TextSpan(
-    //           style: TextStyle(
-    //               fontSize: 18,
-    //               fontWeight: FontWeight.w500,
-    //               color: Colors.black),
-    //           children: [
-    //             TextSpan(text: 'Robo'),
-    //             TextSpan(text: 'L', style: TextStyle(color: pinkConstant)),
-    //             TextSpan(text: 'e', style: TextStyle(color: TealScan)),
-    //             TextSpan(text: 'n', style: TextStyle(color: yellowConstant)),
-    //             TextSpan(text: 's', style: TextStyle(color: orangeConstant)),
-    //           ],
-    //         ),
-    //       ),
-    //       const Spacer(),
-    //     ],
-    //   ),
+      //   child: Row(
+      //     children: [
+      //       Container(
+      //         width: 32,
+      //         height: 32,
+      //         decoration: BoxDecoration(
+      //           color: grayConstant,
+      //           borderRadius: BorderRadius.circular(10),
+      //         ),
+      //         clipBehavior: Clip.antiAlias,
+      //         child: Image.asset(
+      //           'web/icons/Icon-111.png',
+      //           fit: BoxFit.cover,
+      //         ),
+      //       ),
+      //       const SizedBox(width: 8),
+      //       RichText(
+      //         text: const TextSpan(
+      //           style: TextStyle(
+      //               fontSize: 18,
+      //               fontWeight: FontWeight.w500,
+      //               color: Colors.black),
+      //           children: [
+      //             TextSpan(text: 'Robo'),
+      //             TextSpan(text: 'L', style: TextStyle(color: pinkConstant)),
+      //             TextSpan(text: 'e', style: TextStyle(color: TealScan)),
+      //             TextSpan(text: 'n', style: TextStyle(color: yellowConstant)),
+      //             TextSpan(text: 's', style: TextStyle(color: orangeConstant)),
+      //           ],
+      //         ),
+      //       ),
+      //       const Spacer(),
+      //     ],
+      //   ),
     );
   }
 
@@ -238,8 +264,10 @@ class HomeScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Hey, ready to check your robot?',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500)),
+          const Text(
+            'Hey, ready to check your robot?',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
+          ),
           const SizedBox(height: 3),
         ],
       ),
@@ -281,9 +309,10 @@ class HomeScreen extends StatelessWidget {
                       Text(
                         title,
                         style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -297,7 +326,9 @@ class HomeScreen extends StatelessWidget {
                       const SizedBox(height: 14),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 10),
+                          horizontal: 18,
+                          vertical: 10,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(14),
@@ -305,9 +336,10 @@ class HomeScreen extends StatelessWidget {
                         child: Text(
                           ctaText,
                           style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: ctaTextColor),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: ctaTextColor,
+                          ),
                         ),
                       ),
                     ],
@@ -391,7 +423,22 @@ class HomeScreen extends StatelessWidget {
       ctaTextColor: orangeConstant,
       icon: Icons.bar_chart,
     );
-    
   }
-  
+
+  Widget batteryMatchLogs(BuildContext context) {
+    return _toolCard(
+      context: context,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BatteryMatchLogsScreen()),
+      ),
+      color: const Color(0xFF546E7A),
+      title: 'Analyze battery match logs',
+      description:
+          'Save voltage, current, and brownout results from a robot match without changing your manual tracker.',
+      ctaText: 'Open match logs',
+      ctaTextColor: const Color(0xFF37474F),
+      icon: Icons.query_stats_outlined,
+    );
+  }
 }
