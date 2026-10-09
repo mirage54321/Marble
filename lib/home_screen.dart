@@ -156,8 +156,8 @@ class HomeScreen extends StatelessWidget {
                         scanner(context),
                         rules(context),
                         battery(context),
-                        batteryMatchLogs(context),
                         stats(context),
+                        batteryMatchLogs(context),
                         const SizedBox(height: 24),
                         const SizedBox(height: 16),
                       ],
@@ -432,12 +432,12 @@ class HomeScreen extends StatelessWidget {
         context,
         MaterialPageRoute(builder: (_) => const BatteryMatchLogsScreen()),
       ),
-      color: const Color(0xFF546E7A),
+      color: const Color.fromARGB(255, 74, 187, 60),
       title: 'Analyze battery match logs',
       description:
           'Save voltage, current, and brownout results from a robot match without changing your manual tracker.',
       ctaText: 'Open match logs',
-      ctaTextColor: const Color(0xFF37474F),
+      ctaTextColor: const Color.fromARGB(255, 74, 187, 60),
       icon: Icons.query_stats_outlined,
     );
   }
