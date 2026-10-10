@@ -13,12 +13,13 @@
 //   node marble-collector.js --once       scan once and exit
 //   node marble-collector.js --analyze f.wpilog   print metrics only, no upload
 //   node marble-collector.js --signals f.wpilog   list every signal in a log
+//   node marble-collector.js --stats f.wpilog --filter "PowerDistribution|Battery"   min/max/last of matching signals
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const readline = require('readline');
-const { DEFAULT_SIGNALS, analyzeFile, matchNameFromFile } = require('./wpilog');
+const { DEFAULT_SIGNALS, analyzeFile, parseWpilog, matchNameFromFile } = require('./wpilog');
 
 const DIR = process.env.MARBLE_COLLECTOR_DIR || __dirname;
 const CONFIG_PATH = path.join(DIR, 'config.json');
@@ -379,6 +380,27 @@ async function scanOnce(config, state) {
 // ---------- entry ----------
 
 async function main() {
+  const statsPath = flagValue('stats');
+  if (statsPath) {
+    // Min / max / last value of every numeric signal whose name matches --filter.
+    const filter = new RegExp(flagValue('filter') || '.', 'i');
+    const buf = fs.readFileSync(statsPath);
+    const { names } = parseWpilog(buf, {});
+    const wanted = {};
+    for (const n of names) {
+      if (filter.test(n.name) && ['double', 'float', 'int64', 'boolean'].includes(n.type)) wanted[n.name] = [n.name];
+    }
+    const { series } = parseWpilog(buf, wanted);
+    for (const name of Object.keys(wanted).sort()) {
+      const sg = series[name];
+      if (!sg) { console.log(`${name.padEnd(42)} no samples`); continue; }
+      let lo = Infinity, hi = -Infinity;
+      for (const v of sg.v) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      console.log(`${name.padEnd(42)} ${String(sg.v.length).padStart(6)} samples  min ${lo.toFixed(2)}  max ${hi.toFixed(2)}  last ${sg.v[sg.v.length - 1].toFixed(2)}`);
+    }
+    return;
+  }
+
   const analyzePath = flagValue('analyze');
   const signalsPath = flagValue('signals');
   if (analyzePath || signalsPath) {
