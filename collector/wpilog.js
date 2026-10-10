@@ -230,7 +230,7 @@ function matchNameFromFile(file, mtime) {
 function analyzeFile(file, signals = DEFAULT_SIGNALS, opts = {}) {
   const buf = fs.readFileSync(file);
   const { series, lastTime, names } = parseWpilog(buf, signals);
-  return { metrics: computeMetrics(series, lastTime, opts), names, buf };
+  return { metrics: computeMetrics(series, lastTime, opts), names, buf, series };
 }
 
 module.exports = { DEFAULT_SIGNALS, parseWpilog, computeMetrics, matchNameFromFile, analyzeFile, matchSignal };
