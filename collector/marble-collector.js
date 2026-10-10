@@ -7,6 +7,7 @@
 //
 //   node marble-collector.js              run (first run does setup)
 //   node marble-collector.js --setup      redo setup
+//   node marble-collector.js --time-zone  choose the log filename's time zone
 //   node marble-collector.js --yes        auto-assign to the "In use" battery, no prompts
 //   node marble-collector.js --all        also import logs older than maxAgeHours
 //   node marble-collector.js --reimport   import logs even if already handled before
@@ -37,6 +38,7 @@ const DEFAULTS = {
   maxAgeHours: 6,          // ignore logs older than this unless --all
   minEnabledSeconds: 15,   // skip pit tests shorter than this
   useWindowsDialog: true,  // show a picker instead of asking in this console
+  logTimestampTimeZone: 'ask',   // ask once: 'utc' or this laptop's local time
   signals: {},             // override signal names, see README
 };
 
@@ -92,6 +94,38 @@ function askWindowsDialog(matchName, timeRange, suggestion, labels) {
       else resolve(output.trim());
     });
   });
+}
+
+function pickLogTimeZone(current) {
+  const picker = path.join(DIR, 'time-zone-picker.ps1');
+  return new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', picker, String(current || 'ask'),
+    ], { windowsHide: true });
+    let output = '';
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) reject(new Error(`Time-zone picker exited with ${code}`));
+      else resolve(output.trim().toLowerCase());
+    });
+  });
+}
+
+async function ensureLogTimeZone(config) {
+  if (String(config.logTimestampTimeZone).toLowerCase() !== 'ask') return;
+  let selected = 'local';
+  if (process.platform === 'win32') {
+    try {
+      const answer = await pickLogTimeZone(config.logTimestampTimeZone);
+      if (answer) selected = answer;
+    } catch (err) {
+      log(`Could not show the time-zone picker (${err.message}); using this laptop's local time.`);
+    }
+  }
+  config.logTimestampTimeZone = selected;
+  saveJson(CONFIG_PATH, config);
+  log(`Log timestamp time zone set to ${selected}.`);
 }
 
 // ---------- Marble API ----------
@@ -270,16 +304,40 @@ async function chooseBattery(config, batteries, isNewest, matchName, timeRange) 
   }
 }
 
-function logStartDate(filePath, fallback) {
+function zoneOffsetMinutes(date, timeZone) {
+  const name = new Intl.DateTimeFormat('en-US', {
+    timeZone, timeZoneName: 'longOffset',
+  }).formatToParts(date).find((part) => part.type === 'timeZoneName')?.value || 'GMT';
+  const match = name.match(/^GMT([+-])(\d{2}):(\d{2})$/);
+  if (!match) return 0;
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  return match[1] === '+' ? minutes : -minutes;
+}
+
+function dateInTimeZone(year, month, day, hour, minute, second, timeZone) {
+  const rough = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  let actual = new Date(rough.getTime() - zoneOffsetMinutes(rough, timeZone) * 60000);
+  // Re-evaluate after applying the offset so daylight saving is based on the log date.
+  actual = new Date(rough.getTime() - zoneOffsetMinutes(actual, timeZone) * 60000);
+  return actual;
+}
+
+function logStartDate(filePath, fallback, timeZone) {
   const base = path.basename(filePath);
   const parts = base.match(/(?:akit_)?(\d{2})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/i);
   if (!parts) return fallback;
   const [, yy, month, day, hour, minute, second] = parts.map(Number);
+  if (String(timeZone).toLowerCase() === 'utc') {
+    return new Date(Date.UTC(2000 + yy, month - 1, day, hour, minute, second));
+  }
+  if (timeZone && String(timeZone).toLowerCase() !== 'local') {
+    try { return dateInTimeZone(2000 + yy, month, day, hour, minute, second, timeZone); } catch { /* use local */ }
+  }
   return new Date(2000 + yy, month - 1, day, hour, minute, second);
 }
 
-function enabledTimeInfo(file, metrics) {
-  const start = logStartDate(file.path, new Date(file.mtimeMs));
+function enabledTimeInfo(file, metrics, timeZone) {
+  const start = logStartDate(file.path, new Date(file.mtimeMs), timeZone);
   const windows = metrics.enabledWindows || [];
   const first = windows[0]?.[0] ?? 0;
   const last = windows[windows.length - 1]?.[1] ?? metrics.enabledSeconds;
@@ -361,7 +419,7 @@ function prepareFile(config, state, file) {
   return {
     file, base, id, m,
     matchName: matchNameFromFile(file.path, new Date(file.mtimeMs)),
-    ...enabledTimeInfo(file, m),
+    ...enabledTimeInfo(file, m, config.logTimestampTimeZone),
   };
 }
 
@@ -499,6 +557,9 @@ async function main() {
   let config = loadJson(CONFIG_PATH, null);
   if (!config || flag('setup') || !config.teamNumber || !config.passcode) config = await setup(config || {});
   config = { ...DEFAULTS, ...config };
+  if (flag('time-zone')) config.logTimestampTimeZone = 'ask';
+  await ensureLogTimeZone(config);
+  if (flag('time-zone')) return;
   const state = loadJson(STATE_PATH, { done: {}, pending: [] });
   state.pending ||= [];
   state.done ||= {};

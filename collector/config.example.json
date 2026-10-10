@@ -9,6 +9,7 @@
   "maxAgeHours": 6,
   "minEnabledSeconds": 15,
   "useWindowsDialog": true,
+  "logTimestampTimeZone": "ask",
   "signals": {
     "voltage": ["Battery/VoltageVolts"],
     "current": ["Battery/TotalCurrentAmps"],

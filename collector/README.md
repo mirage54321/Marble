@@ -21,6 +21,10 @@ Windows does not allow a USB drive to launch an app by itself. The background co
 
 When several new logs are found, Marble asks about them oldest first and shows each robot-enabled time range. Type `?` in the popup when you do not know the battery. The log is safely uploaded as **Needs battery assignment** and can be assigned later from Marble's **Battery Match Logs** screen.
 
+### Correcting displayed log times
+
+Battery measurements do not depend on the clock, but the displayed enabled-time range does. On the next collector start, a Windows dropdown asks what time zone the robot log timestamps use, then remembers the answer in `config.json`. It includes UTC plus Pacific, Mountain, Arizona, Central, Eastern, Alaska, Hawaii, UK, and Central European time. Daylight saving is calculated from the log's date.
+
 For an immediate hidden start without signing out, double-click `start-background.vbs`. If something seems wrong, read `collector.log` in this folder.
 
 ## Useful commands
