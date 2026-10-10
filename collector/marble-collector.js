@@ -9,6 +9,7 @@
 //   node marble-collector.js --setup      redo setup
 //   node marble-collector.js --yes        auto-assign to the "In use" battery, no prompts
 //   node marble-collector.js --all        also import logs older than maxAgeHours
+//   node marble-collector.js --reimport   import logs even if already handled before
 //   node marble-collector.js --once       scan once and exit
 //   node marble-collector.js --analyze f.wpilog   print metrics only, no upload
 //   node marble-collector.js --signals f.wpilog   list every signal in a log
@@ -250,6 +251,8 @@ async function flushPending(config, state) {
   }
 }
 
+const reportedDone = new Set();
+
 // Reads and analyzes a log. Returns null when it should be ignored (and records why).
 function prepareFile(config, state, file) {
   const base = path.basename(file.path);
@@ -266,7 +269,15 @@ function prepareFile(config, state, file) {
     return null;
   }
   const id = logId(analysis.buf);
-  if (state.done[id] || state.pending.some((p) => p.payload.logId === id)) return null;
+  const previous = state.done[id];
+  if (previous && !flag('reimport')) {
+    if (!reportedDone.has(id)) {
+      reportedDone.add(id);
+      log(`Already handled ${base} (${previous.status}${previous.label ? ` -> ${previous.label}` : ''}). To import it again, restart with: node marble-collector.js --reimport`);
+    }
+    return null;
+  }
+  if (state.pending.some((p) => p.payload.logId === id)) return null;
 
   const m = analysis.metrics;
   if (m.enabledSeconds < config.minEnabledSeconds) {
