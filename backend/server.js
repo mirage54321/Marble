@@ -620,6 +620,70 @@ function batteryFlagScore(battery, now = Date.now()) {
   }, 0);
 }
 
+// Conservative screening only: match load, robot wiring, and missing current
+// data can affect one log. This produces warnings, never an automatic retirement.
+function summarizeBatteryTelemetry(records) {
+  const newestFirst = [...records].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+  const voltages = newestFirst
+    .map((record) => record.minimumVoltage)
+    .filter((value) => Number.isFinite(value));
+  const resistances = newestFirst
+    .map((record) => record.internalResistanceMilliohms)
+    .filter((value) => Number.isFinite(value));
+  const brownoutMatches = newestFirst.filter((record) =>
+    Number.isFinite(record.brownoutCount) && record.brownoutCount > 0,
+  ).length;
+  const lowVoltageMatches = newestFirst.filter((record) =>
+    Number.isFinite(record.minimumVoltage) && record.minimumVoltage < 8,
+  ).length;
+  const criticalVoltageMatches = newestFirst.filter((record) =>
+    Number.isFinite(record.minimumVoltage) && record.minimumVoltage < 7,
+  ).length;
+  const latestResistance = resistances[0] ?? null;
+  const olderResistance = resistances.slice(Math.ceil(resistances.length / 2));
+  const baselineResistance = olderResistance.length >= 2
+    ? olderResistance.reduce((sum, value) => sum + value, 0) / olderResistance.length
+    : null;
+  const resistanceRising = latestResistance !== null && baselineResistance !== null &&
+    latestResistance >= baselineResistance * 1.2 && latestResistance - baselineResistance >= 2;
+
+  let status = 'not_enough_data';
+  let reason = 'Needs more match logs';
+  if (brownoutMatches > 0 || criticalVoltageMatches > 0) {
+    status = 'avoid';
+    reason = brownoutMatches > 0
+      ? `${brownoutMatches} match${brownoutMatches === 1 ? '' : 'es'} with a brownout`
+      : `${criticalVoltageMatches} match${criticalVoltageMatches === 1 ? '' : 'es'} below 7V`;
+  } else if (lowVoltageMatches >= 2 || resistanceRising) {
+    status = 'monitor';
+    reason = resistanceRising
+      ? 'Resistance is rising across recent matches'
+      : `${lowVoltageMatches} matches dropped below 8V`;
+  } else if (newestFirst.length >= 2) {
+    status = 'healthy';
+    reason = 'No serious warning in recent match logs';
+  }
+  return {
+    status,
+    reason,
+    matchCount: newestFirst.length,
+    brownoutMatches,
+    lowVoltageMatches,
+    latestMinimumVoltage: voltages[0] ?? null,
+    latestResistanceMilliohms: latestResistance,
+    resistanceRising,
+  };
+}
+
+function healthPenalty(health) {
+  if (!health) return 0;
+  if (health.status === 'avoid') return 3;
+  if (health.status === 'monitor') return 1;
+  return 0;
+}
+
 const STATE_RANK = { charged_ready: 0, available: 0, charging: 1 };
 
 function recommendableBatteries(batteries, now = Date.now()) {
@@ -628,7 +692,7 @@ function recommendableBatteries(batteries, now = Date.now()) {
     .filter(({ info }) => info.state in STATE_RANK);
 }
 
-function fallbackRecommendation(batteries, reason) {
+function fallbackRecommendation(batteries, reason, healthByLabel = new Map()) {
   const now = Date.now();
   const candidates = recommendableBatteries(batteries, now);
 
@@ -636,6 +700,9 @@ function fallbackRecommendation(batteries, reason) {
     candidates.sort((a, b) => {
       const rank = STATE_RANK[a.info.state] - STATE_RANK[b.info.state];
       if (rank !== 0) return rank;
+      const health = healthPenalty(healthByLabel.get(a.battery.label)) -
+        healthPenalty(healthByLabel.get(b.battery.label));
+      if (health !== 0) return health;
       const flags = batteryFlagScore(a.battery, now) - batteryFlagScore(b.battery, now);
       if (flags !== 0) return flags;
       if (a.info.state === 'charging') return a.info.chargeLeft - b.info.chargeLeft;
@@ -1149,6 +1216,32 @@ app.get('/battery/telemetry', async (req, res) => {
   }
 });
 
+app.get('/battery/health', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+    const competitionId = team.batteryCompetitionId || 'legacy';
+    const [batteries, telemetry] = await Promise.all([
+      batteriesCollection.find({ teamNumber: team.teamNumber }).sort({ label: 1 }).toArray(),
+      batteryTelemetryCollection.find({ teamNumber: team.teamNumber, competitionId }).toArray(),
+    ]);
+    const recordsByLabel = new Map();
+    for (const record of telemetry) {
+      const records = recordsByLabel.get(record.label) || [];
+      records.push(record);
+      recordsByLabel.set(record.label, records);
+    }
+    const health = batteries.map((battery) => ({
+      label: battery.label,
+      ...summarizeBatteryTelemetry(recordsByLabel.get(battery.label) || []),
+    }));
+    res.json({ health });
+  } catch (err) {
+    console.error('Battery health error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/battery/telemetry', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
@@ -1272,11 +1365,26 @@ app.post('/battery/recommend', async (req, res) => {
       return res.json({ recommendedLabel: null, reason: 'No batteries logged yet' });
     }
 
+    const telemetry = await batteryTelemetryCollection.find({
+      teamNumber: team.teamNumber,
+      competitionId: team.batteryCompetitionId || 'legacy',
+    }).toArray();
+    const recordsByLabel = new Map();
+    for (const record of telemetry) {
+      const records = recordsByLabel.get(record.label) || [];
+      records.push(record);
+      recordsByLabel.set(record.label, records);
+    }
+    const healthByLabel = new Map(batteries.map((battery) => [
+      battery.label,
+      summarizeBatteryTelemetry(recordsByLabel.get(battery.label) || []),
+    ]));
+
     const now = Date.now();
     const candidates = recommendableBatteries(batteries, now);
 
     if (candidates.length === 0) {
-      return res.json(fallbackRecommendation(batteries));
+      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
     }
 
     if (candidates.length === 1) {
@@ -1287,7 +1395,7 @@ app.post('/battery/recommend', async (req, res) => {
     }
 
     if (!GEMINI_API_KEY) {
-      return res.json(fallbackRecommendation(batteries));
+      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
     }
 
     const summary = candidates
@@ -1304,6 +1412,7 @@ app.post('/battery/recommend', async (req, res) => {
           lastUsed > BATTERY_EPOCH_MS ? `last used ${formatAge(now - lastUsed)}` : 'never used yet';
 
         const flags = Array.isArray(battery.flags) ? battery.flags : [];
+        const health = healthByLabel.get(battery.label);
         const recentFlags = flags.slice(-15).reverse();
         const flagText =
           flags.length === 0
@@ -1318,7 +1427,7 @@ app.post('/battery/recommend', async (req, res) => {
                 )
                 .join('\n');
 
-        return `${battery.label}: ${status}, ${lastUsedText}, ${flagText}`;
+        return `${battery.label}: ${status}, ${lastUsedText}, telemetry: ${health.status} (${health.reason}; ${health.matchCount} logs), ${flagText}`;
       })
       .join('\n\n');
 
@@ -1348,14 +1457,14 @@ app.post('/battery/recommend', async (req, res) => {
       ?.trim();
 
     if (status < 200 || status >= 300 || !rawText) {
-      return res.json(fallbackRecommendation(batteries));
+      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
     }
 
     try {
       const parsed = JSON.parse(rawText);
       const valid = candidates.some(({ battery }) => battery.label === parsed.recommendedLabel);
       if (!valid) {
-        return res.json(fallbackRecommendation(batteries));
+        return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
       }
       return res.json({
         recommendedLabel: parsed.recommendedLabel,
@@ -1363,7 +1472,7 @@ app.post('/battery/recommend', async (req, res) => {
       });
     } catch (parseErr) {
       console.error('Gemini JSON parse error:', parseErr);
-      return res.json(fallbackRecommendation(batteries));
+      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
     }
   } catch (err) {
     console.error('Recommend error:', err);

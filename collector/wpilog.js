@@ -137,6 +137,7 @@ function computeMetrics(series, lastTime, opts = {}) {
     ampHoursUsed: null, internalResistanceMilliohms: null,
     enabledSeconds, hasEnabledSignal: hasSignal,
     missing: ['voltage', 'current', 'brownout'].filter((k) => !series[k]),
+    currentSignalDead: false,
   };
   if (enabledSeconds <= 0) return result;
   const enabled = inWindows(windows);
@@ -158,7 +159,13 @@ function computeMetrics(series, lastTime, opts = {}) {
     }
   }
 
-  const cur = series.current;
+  // A power distribution board that never answered logs one flat 0 A sample.
+  // Treat that as "no reading", not as a battery that drew nothing.
+  let cur = series.current;
+  if (cur && (cur.v.length < 10 || Math.max(...cur.v) <= 0)) {
+    result.currentSignalDead = true;
+    cur = null;
+  }
   if (cur) {
     const check = inWindows(windows);
     let coulombs = 0;

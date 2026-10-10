@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const readline = require('readline');
+const { spawn } = require('child_process');
 const { DEFAULT_SIGNALS, analyzeFile, parseWpilog, matchNameFromFile } = require('./wpilog');
 
 const DIR = process.env.MARBLE_COLLECTOR_DIR || __dirname;
@@ -35,6 +36,7 @@ const DEFAULTS = {
   pollSeconds: 3,
   maxAgeHours: 6,          // ignore logs older than this unless --all
   minEnabledSeconds: 15,   // skip pit tests shorter than this
+  useWindowsDialog: true,  // show a picker instead of asking in this console
   signals: {},             // override signal names, see README
 };
 
@@ -71,6 +73,24 @@ function ask(question) {
   return new Promise((resolve, reject) => {
     rl.once('close', () => { const e = new Error('Input closed'); e.code = 'INPUT_CLOSED'; reject(e); });
     rl.question(question, (a) => resolve(a.trim()));
+  });
+}
+
+function askWindowsDialog(matchName, suggestion, labels) {
+  const picker = path.join(DIR, 'battery-picker.vbs');
+  return new Promise((resolve, reject) => {
+    const child = spawn('cscript.exe', [
+      '//nologo', picker, matchName, suggestion || '', labels.join('|'),
+    ], { windowsHide: true });
+    let output = '';
+    let error = '';
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { error += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) reject(new Error(error || `Battery picker exited with ${code}`));
+      else resolve(output.trim());
+    });
   });
 }
 
@@ -190,6 +210,7 @@ function logId(buf) {
 function printSummary(name, m) {
   console.log(`\n  ${name}  (${fmt(m.enabledSeconds, 0)} s enabled${m.hasEnabledSignal ? '' : ', no enabled signal: whole log used'})`);
   console.log(`  min voltage ${fmt(m.minimumVoltage)} V | below 8V ${fmt(m.secondsBelow8Volts, 1)} s | brownouts ${m.brownoutCount ?? '-'} | ${fmt(m.ampHoursUsed)} Ah | ${fmt(m.internalResistanceMilliohms, 1)} mΩ`);
+  if (m.currentSignalDead) console.log('  WARNING: the current signal is flat at 0 A, so the power distribution board is probably not communicating (check its CAN ID and wiring). Amp-hours and resistance left blank.');
   if (m.missing.length) console.log(`  missing signals: ${m.missing.join(', ')} (run --signals on this file to see real names)`);
 }
 
@@ -214,6 +235,23 @@ async function chooseBattery(config, batteries, isNewest, matchName) {
     log(`${matchName}: older log, can't guess its battery; skipping. Run without --yes to choose.`);
     return null;
   }
+
+  const useDialog = process.platform === 'win32'
+    && (flag('dialog') || config.useWindowsDialog);
+  if (useDialog) {
+    try {
+      const answer = await askWindowsDialog(matchName, suggestion, labels);
+      if (!answer || answer === '__CANCEL__') return null;
+      const match = batteries.find((b) => b.label.toLowerCase() === answer.toLowerCase());
+      if (match) return match.label;
+      if (!batteries.length) return answer;
+      log(`${matchName}: "${answer}" is not one of ${labels.join(', ')}. It will ask again.`);
+      return RETRY;
+    } catch (err) {
+      log(`Windows battery picker unavailable (${err.message}); using this console instead.`);
+    }
+  }
+
   const hint = batteries.length ? `Batteries: ${labels.join(', ')}` : "Couldn't load battery list";
   const prompt = suggestion
     ? `  Assign ${matchName} to ${suggestion}? [Enter = yes, type another label, s = skip]: `

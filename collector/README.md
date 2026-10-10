@@ -7,15 +7,19 @@ Marble Collector watches for new robot `.wpilog` files, calculates battery metri
 1. Deploy the updated `backend/server.js` to Render.
 2. On the pit laptop, double-click `start-collector.bat`.
 3. On its first run, enter the Marble battery team number and passcode.
-4. Keep the window open during the event.
+4. Double-click `install-autostart.bat` once. The collector will then start silently whenever this Windows account signs in.
 
 The collector automatically searches USB drives for a `logs` folder. To also watch a Driver Station download folder, add its path to `watchFolders` in the generated `config.json`.
+
+Windows does not allow a USB drive to launch an app by itself. The background collector is the reliable equivalent: it is already watching when you plug in the log USB, then opens a **Marble Collector** popup asking which battery was in the robot. The battery currently marked **In use** is filled in as the suggestion; replace it if needed, or cancel to skip that log.
 
 ## Match workflow
 
 1. Before the match, use Marble's existing **In use** button on the installed battery.
 2. After the match, plug the robot's FAT32 log USB into the pit laptop, or download the log with Driver Station.
-3. The collector analyzes the new log and asks which battery to assign. For the newest log, it suggests the one marked **In use**.
+3. The collector analyzes the new log and opens a popup. Confirm the suggested battery or type the actual battery label. For the newest log, it suggests the one marked **In use**.
+
+For an immediate hidden start without signing out, double-click `start-background.vbs`. If something seems wrong, read `collector.log` in this folder.
 
 ## Useful commands
 

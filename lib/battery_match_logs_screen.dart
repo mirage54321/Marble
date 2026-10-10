@@ -51,6 +51,34 @@ class _TelemetryRecord {
       );
 }
 
+class _BatteryHealth {
+  const _BatteryHealth({
+    required this.label,
+    required this.status,
+    required this.reason,
+    required this.matchCount,
+    this.latestMinimumVoltage,
+    this.latestResistanceMilliohms,
+  });
+
+  final String label;
+  final String status;
+  final String reason;
+  final int matchCount;
+  final double? latestMinimumVoltage;
+  final double? latestResistanceMilliohms;
+
+  factory _BatteryHealth.fromJson(Map<String, dynamic> json) => _BatteryHealth(
+    label: json['label'] as String? ?? '',
+    status: json['status'] as String? ?? 'not_enough_data',
+    reason: json['reason'] as String? ?? 'Needs more match logs',
+    matchCount: (json['matchCount'] as num?)?.toInt() ?? 0,
+    latestMinimumVoltage: (json['latestMinimumVoltage'] as num?)?.toDouble(),
+    latestResistanceMilliohms: (json['latestResistanceMilliohms'] as num?)
+        ?.toDouble(),
+  );
+}
+
 class BatteryMatchLogsScreen extends StatefulWidget {
   const BatteryMatchLogsScreen({super.key});
 
@@ -71,6 +99,7 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
   String? _selectedBattery;
   List<_BatteryOption> _batteries = [];
   List<_TelemetryRecord> _records = [];
+  List<_BatteryHealth> _health = [];
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -124,14 +153,24 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
             ),
           )
           .timeout(const Duration(seconds: 15));
+      final healthResponse = await http
+          .get(
+            Uri.parse(
+              '$_apiBase/battery/health?teamNumber=$team&passcode=$passcode',
+            ),
+          )
+          .timeout(const Duration(seconds: 15));
       if (batteriesResponse.statusCode != 200 ||
-          telemetryResponse.statusCode != 200) {
+          telemetryResponse.statusCode != 200 ||
+          healthResponse.statusCode != 200) {
         throw StateError('Could not load battery data');
       }
       final batteryJson =
           jsonDecode(batteriesResponse.body) as Map<String, dynamic>;
       final telemetryJson =
           jsonDecode(telemetryResponse.body) as Map<String, dynamic>;
+      final healthJson =
+          jsonDecode(healthResponse.body) as Map<String, dynamic>;
       final batteries = (batteryJson['batteries'] as List<dynamic>? ?? [])
           .map(
             (item) => _BatteryOption(
@@ -145,12 +184,16 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
             (item) => _TelemetryRecord.fromJson(item as Map<String, dynamic>),
           )
           .toList();
+      final health = (healthJson['health'] as List<dynamic>? ?? [])
+          .map((item) => _BatteryHealth.fromJson(item as Map<String, dynamic>))
+          .toList();
       if (!mounted) return;
       setState(() {
         _teamNumber = team;
         _passcode = passcode;
         _batteries = batteries;
         _records = records;
+        _health = health;
         _selectedBattery = batteries.any((b) => b.label == _selectedBattery)
             ? _selectedBattery
             : (batteries.isEmpty ? null : batteries.first.label);
@@ -278,13 +321,22 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
     padding: const EdgeInsets.all(16),
     children: [
       const Text(
-        'Record a match result',
+        'Battery health',
         style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
       ),
       const SizedBox(height: 6),
       const Text(
-        'For now, copy values from AdvantageScope. A .wpilog uploader will fill this in automatically later.',
+        'Imported robot logs are summarized here. These are warnings to review, not automatic retirement decisions.',
       ),
+      const SizedBox(height: 12),
+      ..._health.map(_healthTile),
+      const SizedBox(height: 18),
+      const Text(
+        'Record a match result manually',
+        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+      ),
+      const SizedBox(height: 6),
+      const Text('Use this only when a log was not imported automatically.'),
       const SizedBox(height: 18),
       if (_error != null)
         Text(_error!, style: const TextStyle(color: Colors.red)),
@@ -384,6 +436,39 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
         ),
         title: Text(record.matchName),
         subtitle: Text(stats.join(' • ')),
+      ),
+    );
+  }
+
+  Widget _healthTile(_BatteryHealth health) {
+    final (Color color, String title) = switch (health.status) {
+      'healthy' => (Colors.green, 'LOOKS GOOD'),
+      'monitor' => (Colors.orange, 'MONITOR'),
+      'avoid' => (Colors.red, 'AVOID FOR NOW'),
+      _ => (Colors.blueGrey, 'NEEDS DATA'),
+    };
+    final facts = <String>[
+      '${health.matchCount} log${health.matchCount == 1 ? '' : 's'}',
+      if (health.latestMinimumVoltage != null)
+        '${health.latestMinimumVoltage!.toStringAsFixed(2)} V latest min',
+      if (health.latestResistanceMilliohms != null)
+        '${health.latestResistanceMilliohms!.toStringAsFixed(1)} mΩ latest',
+    ];
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: color,
+          child: Text(
+            health.label,
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(fontWeight: FontWeight.w700, color: color),
+        ),
+        subtitle: Text('${health.reason}\n${facts.join(' • ')}'),
+        isThreeLine: true,
       ),
     );
   }

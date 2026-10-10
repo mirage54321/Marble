@@ -8,6 +8,7 @@
   "pollSeconds": 3,
   "maxAgeHours": 6,
   "minEnabledSeconds": 15,
+  "useWindowsDialog": true,
   "signals": {
     "voltage": ["Battery/VoltageVolts"],
     "current": ["Battery/TotalCurrentAmps"],
