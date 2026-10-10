@@ -23,7 +23,7 @@ When several new logs are found, Marble asks about them oldest first and shows e
 
 ### Correcting displayed log times
 
-Battery measurements do not depend on the clock, but the displayed enabled-time range does. On the next collector start, a Windows dropdown asks what time zone the robot log timestamps use, then remembers the answer in `config.json`. It includes UTC plus Pacific, Mountain, Arizona, Central, Eastern, Alaska, Hawaii, UK, and Central European time. Daylight saving is calculated from the log's date.
+Battery measurements do not depend on the clock, but the displayed enabled-time range does. When the collector first finds a new log, a Windows dropdown asks what time zone the robot log timestamps use, then it immediately continues into the battery-assignment prompts. It remembers the answer in `config.json`. The dropdown includes UTC plus Pacific, Mountain, Arizona, Central, Eastern, Alaska, Hawaii, UK, and Central European time. Daylight saving is calculated from the log's date.
 
 For an immediate hidden start without signing out, double-click `start-background.vbs`. If something seems wrong, read `collector.log` in this folder.
 

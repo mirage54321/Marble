@@ -500,6 +500,14 @@ async function scanOnce(config, state) {
     const item = prepareFile(config, state, f);
     if (item) ready.push(item); else handled.add(fileKey(f));
   }
+  // Ask only when there is an actual log to assign, never while the collector
+  // is quietly waiting for a USB drive.
+  if (ready.length && String(config.logTimestampTimeZone).toLowerCase() === 'ask') {
+    await ensureLogTimeZone(config);
+    for (const item of ready) {
+      Object.assign(item, enabledTimeInfo(item.file, item.m, config.logTimestampTimeZone));
+    }
+  }
   ready.sort((a, b) => a.enabledStartAt.localeCompare(b.enabledStartAt));
   for (let i = 0; i < ready.length; i++) {
     const outcome = await deliver(config, state, ready[i], i === ready.length - 1);
@@ -557,9 +565,11 @@ async function main() {
   let config = loadJson(CONFIG_PATH, null);
   if (!config || flag('setup') || !config.teamNumber || !config.passcode) config = await setup(config || {});
   config = { ...DEFAULTS, ...config };
-  if (flag('time-zone')) config.logTimestampTimeZone = 'ask';
-  await ensureLogTimeZone(config);
-  if (flag('time-zone')) return;
+  if (flag('time-zone')) {
+    config.logTimestampTimeZone = 'ask';
+    await ensureLogTimeZone(config);
+    return;
+  }
   const state = loadJson(STATE_PATH, { done: {}, pending: [] });
   state.pending ||= [];
   state.done ||= {};
