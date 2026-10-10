@@ -170,12 +170,14 @@ function reportFolders(info) {
   }
 }
 
-// A file counts as finished copying once size and mtime are unchanged between polls.
+// A file counts as finished copying once its size and mtime are unchanged between
+// two polls. The file's age is NOT used: a roboRIO with the wrong clock writes
+// files dated in the past or future.
 const seen = new Map();
 function isStable(file) {
   const prev = seen.get(file.path);
   seen.set(file.path, { size: file.size, mtimeMs: file.mtimeMs });
-  return !!prev && prev.size === file.size && prev.mtimeMs === file.mtimeMs && Date.now() - file.mtimeMs > 2000;
+  return !!prev && prev.size === file.size && prev.mtimeMs === file.mtimeMs;
 }
 
 function logId(buf) {
@@ -343,6 +345,7 @@ async function deliver(config, state, item, isNewest) {
 }
 
 const handled = new Set(); // path|size|mtime already processed this session
+const announced = new Set();
 const fileKey = (f) => `${f.path}|${f.size}|${f.mtimeMs}`;
 
 async function scanOnce(config, state) {
@@ -355,11 +358,15 @@ async function scanOnce(config, state) {
   for (const f of files) {
     if (state.skipLogged?.[f.path] === f.size) continue;
     const tooOld = !flag('all') && Date.now() - f.mtimeMs > config.maxAgeHours * 3600 * 1000;
-    if (tooOld) { (state.skipLogged ||= {})[f.path] = f.size; log(`Ignoring old log ${path.basename(f.path)} (use --all to import)`); continue; }
+    if (tooOld) { (state.skipLogged ||= {})[f.path] = f.size; log(`Ignoring ${path.basename(f.path)}: its date is ${new Date(f.mtimeMs).toLocaleString()}, older than ${config.maxAgeHours} h. If the roboRIO's clock is wrong, restart with: node marble-collector.js --all`); continue; }
     fresh.push(f);
   }
   const ready = [];
   for (const f of fresh) {
+    if (!announced.has(fileKey(f))) {
+      announced.add(fileKey(f));
+      log(`Reading ${path.basename(f.path)} (${(f.size / 1024).toFixed(0)} KB, dated ${new Date(f.mtimeMs).toLocaleString()})`);
+    }
     const item = prepareFile(config, state, f);
     if (item) ready.push(item); else handled.add(fileKey(f));
   }
