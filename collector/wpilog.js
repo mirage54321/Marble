@@ -136,6 +136,7 @@ function computeMetrics(series, lastTime, opts = {}) {
     minimumVoltage: null, secondsBelow8Volts: null, brownoutCount: null,
     ampHoursUsed: null, internalResistanceMilliohms: null,
     enabledSeconds, hasEnabledSignal: hasSignal,
+    enabledWindows: windows,
     missing: ['voltage', 'current', 'brownout'].filter((k) => !series[k]),
     currentSignalDead: false,
   };

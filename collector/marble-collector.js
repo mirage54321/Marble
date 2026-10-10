@@ -76,11 +76,11 @@ function ask(question) {
   });
 }
 
-function askWindowsDialog(matchName, suggestion, labels) {
+function askWindowsDialog(matchName, timeRange, suggestion, labels) {
   const picker = path.join(DIR, 'battery-picker.vbs');
   return new Promise((resolve, reject) => {
     const child = spawn('cscript.exe', [
-      '//nologo', picker, matchName, suggestion || '', labels.join('|'),
+      '//nologo', picker, matchName, timeRange, suggestion || '', labels.join('|'),
     ], { windowsHide: true });
     let output = '';
     let error = '';
@@ -215,9 +215,10 @@ function printSummary(name, m) {
 }
 
 const RETRY = Symbol('retry');
+const UNASSIGNED = Symbol('unassigned');
 const warned = new Set();
 
-async function chooseBattery(config, batteries, isNewest, matchName) {
+async function chooseBattery(config, batteries, isNewest, matchName, timeRange) {
   const labels = batteries.map((b) => b.label);
   const inUse = batteries.filter((b) => b.isInUse).map((b) => b.label);
   const suggestion = isNewest && inUse.length === 1 ? inUse[0] : null;
@@ -240,8 +241,9 @@ async function chooseBattery(config, batteries, isNewest, matchName) {
     && (flag('dialog') || config.useWindowsDialog);
   if (useDialog) {
     try {
-      const answer = await askWindowsDialog(matchName, suggestion, labels);
+      const answer = await askWindowsDialog(matchName, timeRange, suggestion, labels);
       if (!answer || answer === '__CANCEL__') return null;
+      if (answer === '__UNKNOWN__') return UNASSIGNED;
       const match = batteries.find((b) => b.label.toLowerCase() === answer.toLowerCase());
       if (match) return match.label;
       if (!batteries.length) return answer;
@@ -254,17 +256,41 @@ async function chooseBattery(config, batteries, isNewest, matchName) {
 
   const hint = batteries.length ? `Batteries: ${labels.join(', ')}` : "Couldn't load battery list";
   const prompt = suggestion
-    ? `  Assign ${matchName} to ${suggestion}? [Enter = yes, type another label, s = skip]: `
-    : `  Which battery for ${matchName}? ${hint}  [type label, s = skip]: `;
+    ? `  ${matchName} (${timeRange}). Assign to ${suggestion}? [Enter = yes, type label, ? = don't know, s = skip]: `
+    : `  ${matchName} (${timeRange}). Which battery? ${hint}  [type label, ? = don't know, s = skip]: `;
   for (;;) {
     const answer = await ask(prompt);
     if (suggestion && (answer === '' || /^y(es)?$/i.test(answer))) return suggestion;
+    if (/^(\?|unknown|don't know)$/i.test(answer)) return UNASSIGNED;
     if (/^s(kip)?$/i.test(answer) || (answer === '' && !suggestion)) return null;
     const match = batteries.find((b) => b.label.toLowerCase() === answer.toLowerCase());
     if (match) return match.label;
     if (!batteries.length && answer) return answer; // offline: trust the typed label
     console.log('  No battery with that label.');
   }
+}
+
+function logStartDate(filePath, fallback) {
+  const base = path.basename(filePath);
+  const parts = base.match(/(?:akit_)?(\d{2})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/i);
+  if (!parts) return fallback;
+  const [, yy, month, day, hour, minute, second] = parts.map(Number);
+  return new Date(2000 + yy, month - 1, day, hour, minute, second);
+}
+
+function enabledTimeInfo(file, metrics) {
+  const start = logStartDate(file.path, new Date(file.mtimeMs));
+  const windows = metrics.enabledWindows || [];
+  const first = windows[0]?.[0] ?? 0;
+  const last = windows[windows.length - 1]?.[1] ?? metrics.enabledSeconds;
+  const enabledStart = new Date(start.getTime() + first * 1000);
+  const enabledEnd = new Date(start.getTime() + last * 1000);
+  const time = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return {
+    enabledStartAt: enabledStart.toISOString(),
+    enabledEndAt: enabledEnd.toISOString(),
+    range: `${time(enabledStart)}–${time(enabledEnd)}`,
+  };
 }
 
 async function upload(config, payload) {
@@ -286,7 +312,8 @@ async function flushPending(config, state) {
         state.pending = state.pending.filter((p) => p !== item);
         state.done[item.payload.logId] = { file: item.payload.logFile, at: new Date().toISOString(), status: res.ok ? 'uploaded' : 'rejected' };
         saveJson(STATE_PATH, state);
-        log(res.ok ? `Uploaded queued ${item.payload.matchName} -> ${item.payload.label}` : `Dropped queued ${item.payload.matchName}: ${res.error}`);
+        const target = item.payload.unassigned ? 'Needs battery assignment' : item.payload.label;
+        log(res.ok ? `Uploaded queued ${item.payload.matchName} -> ${target}` : `Dropped queued ${item.payload.matchName}: ${res.error}`);
       }
     } catch { return; } // still offline; try again next poll
   }
@@ -331,11 +358,15 @@ function prepareFile(config, state, file) {
     markDone(id, 'no signals');
     return null;
   }
-  return { file, base, id, m, matchName: matchNameFromFile(file.path, new Date(file.mtimeMs)) };
+  return {
+    file, base, id, m,
+    matchName: matchNameFromFile(file.path, new Date(file.mtimeMs)),
+    ...enabledTimeInfo(file, m),
+  };
 }
 
 async function deliver(config, state, item, isNewest) {
-  const { base, id, m, matchName } = item;
+  const { base, id, m, matchName, enabledStartAt, enabledEndAt, range } = item;
   log(`New log: ${base}`);
   printSummary(matchName, m);
 
@@ -346,7 +377,7 @@ async function deliver(config, state, item, isNewest) {
     log(`Could not load batteries (${err.message})`);
     if (flag('yes')) return RETRY;
   }
-  const label = await chooseBattery(config, batteries, isNewest, matchName);
+  const label = await chooseBattery(config, batteries, isNewest, matchName, range);
   if (label === RETRY) return RETRY;
   if (!label) {
     state.done[id] = { file: base, at: new Date().toISOString(), status: 'skipped' };
@@ -356,7 +387,8 @@ async function deliver(config, state, item, isNewest) {
 
   const round = (v, d) => (v === null ? null : Number(v.toFixed(d)));
   const payload = {
-    label, matchName, source: 'wpilog', logId: id, logFile: base,
+    ...(label === UNASSIGNED ? { unassigned: true } : { label }),
+    matchName, source: 'wpilog', logId: id, logFile: base, enabledStartAt, enabledEndAt,
     minimumVoltage: round(m.minimumVoltage, 2),
     secondsBelow8Volts: round(m.secondsBelow8Volts, 2),
     brownoutCount: m.brownoutCount,
@@ -366,8 +398,9 @@ async function deliver(config, state, item, isNewest) {
   try {
     const res = await upload(config, payload);
     if (res.ok) {
-      log(res.duplicate ? `${matchName} was already in Marble.` : `Uploaded ${matchName} -> ${label}`);
-      state.done[id] = { file: base, at: new Date().toISOString(), status: 'uploaded', label };
+      const target = label === UNASSIGNED ? 'Needs battery assignment' : label;
+      log(res.duplicate ? `${matchName} was already in Marble.` : `Uploaded ${matchName} -> ${target}`);
+      state.done[id] = { file: base, at: new Date().toISOString(), status: 'uploaded', ...(label === UNASSIGNED ? {} : { label }) };
     } else if (res.fatal) {
       log(`Marble rejected ${matchName}: ${res.error}`);
       state.done[id] = { file: base, at: new Date().toISOString(), status: 'rejected' };
@@ -409,6 +442,7 @@ async function scanOnce(config, state) {
     const item = prepareFile(config, state, f);
     if (item) ready.push(item); else handled.add(fileKey(f));
   }
+  ready.sort((a, b) => a.enabledStartAt.localeCompare(b.enabledStartAt));
   for (let i = 0; i < ready.length; i++) {
     const outcome = await deliver(config, state, ready[i], i === ready.length - 1);
     if (outcome !== RETRY) handled.add(fileKey(ready[i].file));

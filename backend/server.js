@@ -1247,10 +1247,13 @@ app.post('/battery/telemetry', async (req, res) => {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
 
-    const label = cleanString(req.body.label);
-    if (!label) return res.status(400).json({ error: 'label is required' });
-    const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
-    if (!battery) return res.status(404).json({ error: 'Battery not found' });
+    const unassigned = req.body.unassigned === true;
+    const label = unassigned ? '' : cleanString(req.body.label);
+    if (!unassigned && !label) return res.status(400).json({ error: 'label is required' });
+    if (label) {
+      const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
+      if (!battery) return res.status(404).json({ error: 'Battery not found' });
+    }
 
     const metrics = {
       minimumVoltage: optionalNonNegativeMetric(req.body.minimumVoltage),
@@ -1286,17 +1289,48 @@ app.post('/battery/telemetry', async (req, res) => {
     const telemetry = {
       teamNumber: team.teamNumber,
       competitionId: team.batteryCompetitionId || 'legacy',
-      label,
+      label: label || null,
+      assignmentStatus: unassigned ? 'unassigned' : 'assigned',
       matchName: cleanString(req.body.matchName) || 'Practice',
       ...metrics,
       source: fromLog ? 'wpilog' : 'manual',
       ...(logId ? { logId, logFile: cleanString(req.body.logFile) } : {}),
+      ...(cleanString(req.body.enabledStartAt) ? { enabledStartAt: cleanString(req.body.enabledStartAt) } : {}),
+      ...(cleanString(req.body.enabledEndAt) ? { enabledEndAt: cleanString(req.body.enabledEndAt) } : {}),
       createdAt: new Date().toISOString(),
     };
     await batteryTelemetryCollection.insertOne(telemetry);
     res.json({ ok: true, telemetry });
   } catch (err) {
     console.error('Battery telemetry save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/battery/telemetry/assign', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const logId = cleanString(req.body.logId);
+    const label = cleanString(req.body.label);
+    if (!logId || !label) return res.status(400).json({ error: 'logId and label are required' });
+    const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
+    if (!battery) return res.status(404).json({ error: 'Battery not found' });
+
+    const result = await batteryTelemetryCollection.updateOne(
+      {
+        teamNumber: team.teamNumber,
+        competitionId: team.batteryCompetitionId || 'legacy',
+        logId,
+        assignmentStatus: 'unassigned',
+      },
+      { $set: { label, assignmentStatus: 'assigned', assignedAt: new Date().toISOString() } },
+    );
+    if (result.matchedCount !== 1) return res.status(404).json({ error: 'Unassigned log not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Battery telemetry assignment error:', err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -19,6 +19,8 @@ Windows does not allow a USB drive to launch an app by itself. The background co
 2. After the match, plug the robot's FAT32 log USB into the pit laptop, or download the log with Driver Station.
 3. The collector analyzes the new log and opens a popup. Confirm the suggested battery or type the actual battery label. For the newest log, it suggests the one marked **In use**.
 
+When several new logs are found, Marble asks about them oldest first and shows each robot-enabled time range. Type `?` in the popup when you do not know the battery. The log is safely uploaded as **Needs battery assignment** and can be assigned later from Marble's **Battery Match Logs** screen.
+
 For an immediate hidden start without signing out, double-click `start-background.vbs`. If something seems wrong, read `collector.log` in this folder.
 
 ## Useful commands

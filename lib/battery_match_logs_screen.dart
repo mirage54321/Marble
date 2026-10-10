@@ -19,6 +19,10 @@ class _TelemetryRecord {
     required this.label,
     required this.matchName,
     required this.createdAt,
+    required this.assignmentStatus,
+    this.logId,
+    this.enabledStartAt,
+    this.enabledEndAt,
     this.minimumVoltage,
     this.secondsBelow8Volts,
     this.brownoutCount,
@@ -29,6 +33,10 @@ class _TelemetryRecord {
   final String label;
   final String matchName;
   final DateTime createdAt;
+  final String assignmentStatus;
+  final String? logId;
+  final DateTime? enabledStartAt;
+  final DateTime? enabledEndAt;
   final double? minimumVoltage;
   final double? secondsBelow8Volts;
   final double? brownoutCount;
@@ -42,6 +50,10 @@ class _TelemetryRecord {
         createdAt:
             DateTime.tryParse(json['createdAt'] as String? ?? '') ??
             DateTime.now(),
+        assignmentStatus: json['assignmentStatus'] as String? ?? 'assigned',
+        logId: json['logId'] as String?,
+        enabledStartAt: DateTime.tryParse(json['enabledStartAt'] as String? ?? ''),
+        enabledEndAt: DateTime.tryParse(json['enabledEndAt'] as String? ?? ''),
         minimumVoltage: (json['minimumVoltage'] as num?)?.toDouble(),
         secondsBelow8Volts: (json['secondsBelow8Volts'] as num?)?.toDouble(),
         brownoutCount: (json['brownoutCount'] as num?)?.toDouble(),
@@ -271,6 +283,32 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
     }
   }
 
+  Future<void> _assignPending(_TelemetryRecord record, String label) async {
+    if (record.logId == null || _saving) return;
+    setState(() => _saving = true);
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_apiBase/battery/telemetry/assign'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'teamNumber': _teamNumber,
+              'passcode': _passcode,
+              'logId': record.logId,
+              'label': label,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) throw StateError('Assignment failed');
+      await _load();
+      _message('${record.matchName} assigned to $label.');
+    } catch (_) {
+      _message('Could not assign that log. Try again.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   void _message(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
@@ -320,6 +358,19 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
   Widget _content() => ListView(
     padding: const EdgeInsets.all(16),
     children: [
+      if (_records.any((record) => record.assignmentStatus == 'unassigned')) ...[
+        const Text(
+          'Needs battery assignment',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        const Text('These robot logs were saved without guessing a battery.'),
+        const SizedBox(height: 8),
+        ..._records
+            .where((record) => record.assignmentStatus == 'unassigned')
+            .map(_pendingTile),
+        const SizedBox(height: 18),
+      ],
       const Text(
         'Battery health',
         style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
@@ -397,7 +448,9 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
       ),
       const SizedBox(height: 8),
       if (_records.isEmpty) const Text('No match metrics yet.'),
-      ..._records.map(_recordTile),
+      ..._records
+          .where((record) => record.assignmentStatus != 'unassigned')
+          .map(_recordTile),
     ],
   );
 
@@ -439,6 +492,50 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
       ),
     );
   }
+
+  String _timeRange(_TelemetryRecord record) {
+    String time(DateTime date) {
+      final local = date.toLocal();
+      final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+      final minute = local.minute.toString().padLeft(2, '0');
+      return '$hour:$minute ${local.hour < 12 ? 'AM' : 'PM'}';
+    }
+    if (record.enabledStartAt != null && record.enabledEndAt != null) {
+      return 'Robot enabled: ${time(record.enabledStartAt!)}–${time(record.enabledEndAt!)}';
+    }
+    return 'Imported ${time(record.createdAt)}';
+  }
+
+  Widget _pendingTile(_TelemetryRecord record) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(record.matchName, style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(_timeRange(record)),
+          const SizedBox(height: 10),
+          const Text('Which battery was installed?'),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _batteries
+                .map(
+                  (battery) => OutlinedButton(
+                    onPressed: _saving
+                        ? null
+                        : () => _assignPending(record, battery.label),
+                    child: Text(battery.label),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _healthTile(_BatteryHealth health) {
     final (Color color, String title) = switch (health.status) {
