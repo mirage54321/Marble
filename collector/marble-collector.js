@@ -23,7 +23,10 @@ const readline = require('readline');
 const { spawn } = require('child_process');
 const { DEFAULT_SIGNALS, analyzeFile, parseWpilog, matchNameFromFile } = require('./wpilog');
 
-const DIR = process.env.MARBLE_COLLECTOR_DIR || __dirname;
+const ASSET_DIR = __dirname;
+// The desktop app keeps team credentials and its offline queue in the Windows
+// user profile. Standalone script use keeps them beside this file.
+const DIR = process.env.MARBLE_COLLECTOR_DIR || ASSET_DIR;
 const CONFIG_PATH = path.join(DIR, 'config.json');
 const STATE_PATH = path.join(DIR, 'collector-state.json');
 
@@ -79,7 +82,7 @@ function ask(question) {
 }
 
 function askWindowsDialog(matchName, timeRange, suggestion, labels) {
-  const picker = path.join(DIR, 'battery-picker.vbs');
+  const picker = path.join(ASSET_DIR, 'battery-picker.vbs');
   return new Promise((resolve, reject) => {
     const child = spawn('cscript.exe', [
       '//nologo', picker, matchName, timeRange, suggestion || '', labels.join('|'),
@@ -97,7 +100,7 @@ function askWindowsDialog(matchName, timeRange, suggestion, labels) {
 }
 
 function pickLogTimeZone(current) {
-  const picker = path.join(DIR, 'time-zone-picker.ps1');
+  const picker = path.join(ASSET_DIR, 'time-zone-picker.ps1');
   return new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', [
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', picker, String(current || 'ask'),

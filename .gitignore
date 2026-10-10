@@ -43,3 +43,5 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+collector-desktop/node_modules/
+collector-desktop/dist/

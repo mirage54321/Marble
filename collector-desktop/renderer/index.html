@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Marble Collector</title><link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <header><div><h1>Marble Collector</h1><p>Robot battery log companion</p></div><span id="status" class="status">Starting…</span></header>
+      <section class="card">
+        <h2>Connect to Marble</h2><p class="hint">Set this up once on the pit laptop. It then watches for robot log USB drives automatically.</p>
+        <form id="settings">
+          <label>Marble server URL<input id="apiBase" required /></label>
+          <div class="columns"><label>Team number<input id="teamNumber" inputmode="numeric" required /></label><label>Battery passcode<input id="passcode" type="password" required /></label></div>
+          <label>Optional Driver Station log folder<span class="folder-row"><input id="watchFolder" readonly /><button type="button" id="chooseFolder">Choose folder</button></span></label>
+          <label>Time zone written in robot-log filenames<select id="timeZone"><option value="ask">Ask when the first new log is found</option><option value="utc">UTC</option><option value="America/Los_Angeles">Pacific Time (Los Angeles)</option><option value="America/Denver">Mountain Time (Denver)</option><option value="America/Phoenix">Arizona Time (Phoenix)</option><option value="America/Chicago">Central Time (Chicago)</option><option value="America/New_York">Eastern Time (New York)</option><option value="America/Anchorage">Alaska Time (Anchorage)</option><option value="Pacific/Honolulu">Hawaii Time (Honolulu)</option><option value="Europe/London">United Kingdom (London)</option><option value="Europe/Paris">Central European Time (Paris)</option></select></label>
+          <label class="checkbox"><input id="autoStart" type="checkbox" /> Start Marble Collector when I sign in to Windows</label>
+          <button class="primary" type="submit">Save &amp; start watching</button>
+        </form>
+      </section>
+      <section class="card"><div class="section-head"><h2>Collector activity</h2><span><button id="start">Start</button> <button id="stop">Stop</button> <button id="openFolder">Open data folder</button></span></div><pre id="logs">Waiting for collector output…</pre></section>
+    </main><script src="renderer.js"></script>
+  </body>
+</html>

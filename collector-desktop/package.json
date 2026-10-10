@@ -1,0 +1,16 @@
+{
+  "name": "marble-collector-desktop",
+  "version": "0.1.0",
+  "description": "Windows tray companion for Marble robot battery logs",
+  "main": "main.js",
+  "scripts": { "start": "electron .", "dist": "electron-builder --win nsis" },
+  "devDependencies": { "electron": "^39.2.6", "electron-builder": "^26.0.12" },
+  "build": {
+    "appId": "org.ridgebotics.marblecollector",
+    "productName": "Marble Collector",
+    "asar": true,
+    "files": ["main.js", "preload.js", "renderer/**/*", "package.json"],
+    "extraResources": [{ "from": "../collector", "to": "collector", "filter": ["**/*", "!config.json", "!collector-state.json", "!collector.log", "!*.wpilog", "!test{,/**/*}"] }],
+    "win": { "target": "nsis" }
+  }
+}
