@@ -434,6 +434,7 @@ async function connectToMongo() {
   await batteriesCollection.createIndex({ teamNumber: 1, lastUsedAt: 1 });
   await batteryTelemetryCollection.createIndex({ teamNumber: 1, createdAt: -1 });
   await batteryTelemetryCollection.createIndex({ teamNumber: 1, label: 1, createdAt: -1 });
+  await batteryTelemetryCollection.createIndex({ teamNumber: 1, logId: 1 }, { sparse: true });
   await pushSubscriptionsCollection.createIndex({ endpoint: 1 }, { unique: true });
   await pushSubscriptionsCollection.createIndex({ teamNumber: 1, eventKey: 1 });
   await notifiedMatchesCollection.createIndex(
@@ -1172,13 +1173,31 @@ app.post('/battery/telemetry', async (req, res) => {
       return res.status(400).json({ error: 'At least one metric is required' });
     }
 
+    // A collector upload includes a hash of the source WPILOG. Keep imports
+    // idempotent even if the collector's local state is lost.
+    const fromLog = req.body.source === 'wpilog';
+    const logId = fromLog ? cleanString(req.body.logId) : '';
+    if (fromLog && !logId) {
+      return res.status(400).json({ error: 'logId is required for log uploads' });
+    }
+    if (logId) {
+      const duplicate = await batteryTelemetryCollection.findOne({
+        teamNumber: team.teamNumber,
+        logId,
+      });
+      if (duplicate) {
+        return res.status(409).json({ error: 'Log already imported', duplicate: true });
+      }
+    }
+
     const telemetry = {
       teamNumber: team.teamNumber,
       competitionId: team.batteryCompetitionId || 'legacy',
       label,
       matchName: cleanString(req.body.matchName) || 'Practice',
       ...metrics,
-      source: 'manual',
+      source: fromLog ? 'wpilog' : 'manual',
+      ...(logId ? { logId, logFile: cleanString(req.body.logFile) } : {}),
       createdAt: new Date().toISOString(),
     };
     await batteryTelemetryCollection.insertOne(telemetry);

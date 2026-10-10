@@ -1,0 +1,16 @@
+{
+  "apiBase": "https://ridgeboticsapp.onrender.com",
+  "teamNumber": "1234",
+  "passcode": "your battery tracker passcode",
+  "watchFolders": ["C:\\Users\\you\\Documents\\FRC Logs"],
+  "scanDrives": true,
+  "driveSubfolder": "logs",
+  "pollSeconds": 3,
+  "maxAgeHours": 6,
+  "minEnabledSeconds": 15,
+  "signals": {
+    "voltage": ["Battery/VoltageVolts"],
+    "current": ["Battery/TotalCurrentAmps"],
+    "brownout": ["Battery/BrownedOut"]
+  }
+}
