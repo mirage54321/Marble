@@ -122,10 +122,11 @@ async function candidateFolders(config) {
   const folders = new Set(config.watchFolders.filter(Boolean));
   if (config.scanDrives && process.platform === 'win32') {
     const letters = 'DEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-    const found = await Promise.all(letters.map(async (l) => {
-      const dir = `${l}:\\${config.driveSubfolder}`;
+    const subs = [config.driveSubfolder, ''].filter((v, i, a) => a.indexOf(v) === i);
+    const found = await Promise.all(letters.flatMap((l) => subs.map(async (sub) => {
+      const dir = sub ? `${l}:\\${sub}` : `${l}:\\`;
       try { await fs.promises.access(dir); return dir; } catch { return null; }
-    }));
+    })));
     found.filter(Boolean).forEach((d) => folders.add(d));
   }
   return [...folders];
@@ -133,19 +134,39 @@ async function candidateFolders(config) {
 
 async function listLogs(folders) {
   const files = [];
+  const info = new Map(); // folder -> { wpilog, dslog }
   for (const dir of folders) {
     let names;
     try { names = await fs.promises.readdir(dir); } catch { continue; }
+    const counts = { wpilog: 0, dslog: 0 };
     for (const name of names) {
-      if (!name.toLowerCase().endsWith('.wpilog')) continue;
+      const lower = name.toLowerCase();
+      if (lower.endsWith('.dslog')) counts.dslog++;
+      if (!lower.endsWith('.wpilog')) continue;
+      counts.wpilog++;
       const full = path.join(dir, name);
       try {
         const st = await fs.promises.stat(full);
         files.push({ path: full, size: st.size, mtimeMs: st.mtimeMs });
       } catch { /* file vanished */ }
     }
+    info.set(dir, counts);
   }
-  return files;
+  return { files, info };
+}
+
+// Tell the user what was found in each folder, once per change, so a silent
+// "nothing happens" never looks like a bug.
+const lastNotice = new Map();
+function reportFolders(info) {
+  for (const [dir, c] of info) {
+    const key = `${c.wpilog}|${c.dslog}`;
+    if (lastNotice.get(dir) === key) continue;
+    lastNotice.set(dir, key);
+    if (c.wpilog > 0) log(`Found ${c.wpilog} .wpilog file(s) in ${dir}`);
+    else if (c.dslog > 0) log(`${dir} has ${c.dslog} Driver Station log(s) (.dslog) but no .wpilog. Driver Station logs don't include battery current; Marble needs the robot's .wpilog files from the roboRIO's USB stick.`);
+    else log(`Looking in ${dir}: no .wpilog files yet.`);
+  }
 }
 
 // A file counts as finished copying once size and mtime are unchanged between polls.
@@ -316,7 +337,9 @@ const fileKey = (f) => `${f.path}|${f.size}|${f.mtimeMs}`;
 async function scanOnce(config, state) {
   await flushPending(config, state);
   const folders = await candidateFolders(config);
-  const files = (await listLogs(folders)).filter(isStable).filter((f) => !handled.has(fileKey(f))).sort((a, b) => a.mtimeMs - b.mtimeMs);
+  const listing = await listLogs(folders);
+  reportFolders(listing.info);
+  const files = listing.files.filter(isStable).filter((f) => !handled.has(fileKey(f))).sort((a, b) => a.mtimeMs - b.mtimeMs);
   const fresh = [];
   for (const f of files) {
     if (state.skipLogged?.[f.path] === f.size) continue;
@@ -362,7 +385,7 @@ async function main() {
 
   const folders = await candidateFolders(config);
   console.log(`Marble Collector running for team ${config.teamNumber}.`);
-  console.log(folders.length ? `Watching: ${folders.join(', ')}` : 'No log folder found yet. Plug in the log USB (looks for <drive>:\\' + config.driveSubfolder + ') or add watchFolders in config.json.');
+  console.log(folders.length ? `Watching: ${folders.join(', ')}` : 'No USB drive or log folder found yet. Plug in the log USB (checks every drive letter, in the root and in \\' + config.driveSubfolder + ') or add watchFolders in config.json. Waiting...');
   console.log('Leave this window open. Ctrl+C to stop.\n');
 
   do {
