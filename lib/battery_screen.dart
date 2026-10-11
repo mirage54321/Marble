@@ -946,37 +946,30 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Widget _modeFooter() {
-    if (!_autoMode) {
-      // Deliberately tiny and quiet, but always there.
-      return Center(
-        child: TapCursor(
-          onTap: _confirmSwitchToConnector,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.computer, size: 11, color: Colors.grey[400]),
-              const SizedBox(width: 4),
-              Text('Marble Connector Desktop',
-                  style: TextStyle(fontSize: 10, color: Colors.grey[500])),
-            ]),
-          ),
+    // Always bottom right. Manual mode: one small button. Connector mode:
+    // Instructions and Switch to manual, stacked.
+    final buttons = _autoMode
+        ? <Widget>[
+            _footerButton(Icons.help_outline, 'Instructions',
+                () => _openConnectorSetup(instructionsOnly: true)),
+            const SizedBox(height: 6),
+            _footerButton(
+                Icons.swap_horiz, 'Switch to manual', _confirmSwitchToManual),
+          ]
+        : <Widget>[
+            _footerButton(Icons.computer, 'Marble Connector Desktop',
+                _confirmSwitchToConnector),
+          ];
+    return Align(
+      alignment: Alignment.bottomRight,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: buttons,
         ),
-      );
-    }
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Row(children: [
-        Expanded(
-          child: _footerButton(Icons.help_outline, 'Instructions',
-              () => _openConnectorSetup(instructionsOnly: true)),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _footerButton(
-              Icons.swap_horiz, 'Switch to manual', _confirmSwitchToManual),
-        ),
-      ]),
+      ),
     );
   }
 
@@ -984,17 +977,17 @@ class _BatteryScreenState extends State<BatteryScreen>
     return TapCursor(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: YellorLight,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(20),
         ),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, size: 16, color: YellorDark),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14, color: YellorDark),
           const SizedBox(width: 6),
           Text(label,
               style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w500, color: YellorDark)),
+                  fontSize: 12, fontWeight: FontWeight.w500, color: YellorDark)),
         ]),
       ),
     );
