@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'batteryLOGIN_screen.dart';
+import 'connector_setup_screen.dart';
 
 const Yellor = Color(0xFFFFC107);
 const YellorLight = Color(0xFFFFF4E5);
@@ -182,6 +183,9 @@ class _BatteryScreenState extends State<BatteryScreen>
   String? teamName;
   bool _isGuest = false;
 
+  // true = Marble Connector Desktop mode (manual buttons hidden)
+  bool _autoMode = false;
+
   String? _recommendedLabel;
   String? _recommendReason;
   bool _loadingRecommendation = false;
@@ -269,9 +273,19 @@ class _BatteryScreenState extends State<BatteryScreen>
     _passcode = pass;
     _isGuest = guest;
     teamName = savedTeamName;
+    _autoMode = !guest && prefs.getString('battery_mode_$team') == 'auto';
     await _loadPending();
     await _loadBatteries();
     if (mounted) _startPolling();
+
+    // Set by the register screen right after a brand-new account is made.
+    if (!guest && prefs.getBool('battery_connector_ask_$team') == true) {
+      await prefs.remove('battery_connector_ask_$team');
+      if (mounted) {
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _askConnectorFirstTime());
+      }
+    }
   }
 
   Future<void> _loadBatteries({bool silent = false}) async {
@@ -331,6 +345,10 @@ class _BatteryScreenState extends State<BatteryScreen>
           _recommendReason = null;
         }
       });
+
+      if (!silent && _autoMode && !_isGuest) {
+        unawaited(_askAiRecommendation());
+      }
 
       unawaited(_syncPending());
     } catch (e) {
@@ -825,6 +843,163 @@ class _BatteryScreenState extends State<BatteryScreen>
     );
   }
 
+  static const String _connectorBlurb =
+      'Marble Connector Desktop is a small app on your computer. It reads '
+      'your robot\'s match logs and keeps track of your batteries for you. '
+      'Marble then just shows your batteries and which one to use, with no '
+      'buttons to tap.';
+
+  Future<void> _setMode(bool auto) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
+    if (!mounted) return;
+    setState(() {
+      _autoMode = auto;
+      _recommendedLabel = null;
+      _recommendReason = null;
+    });
+    if (auto) unawaited(_askAiRecommendation());
+  }
+
+  Future<bool> _openConnectorSetup({bool instructionsOnly = false}) async {
+    final done = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            ConnectorSetupScreen(instructionsOnly: instructionsOnly),
+      ),
+    );
+    return done == true;
+  }
+
+  Future<void> _startConnectorSetup() async {
+    final done = await _openConnectorSetup();
+    if (done && mounted) await _setMode(true);
+  }
+
+  Future<void> _askConnectorFirstTime() async {
+    if (!mounted) return;
+    final yes = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Use Marble Connector Desktop?'),
+        content: const Text(_connectorBlurb),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No, keep it manual')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Yellor),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Yes, set it up')),
+        ],
+      ),
+    );
+    if (yes == true) {
+      await _startConnectorSetup();
+    } else {
+      await _setMode(false);
+    }
+  }
+
+  Future<void> _confirmSwitchToConnector() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Switch to Marble Connector Desktop?'),
+        content: const Text(_connectorBlurb),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Yellor),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Switch')),
+        ],
+      ),
+    );
+    if (yes == true) await _startConnectorSetup();
+  }
+
+  Future<void> _confirmSwitchToManual() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Switch back to manual?'),
+        content: const Text(
+            'The Use, Charge and Flag buttons will come back and you will '
+            'track batteries by hand again.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Yellor),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Switch to manual')),
+        ],
+      ),
+    );
+    if (yes == true) await _setMode(false);
+  }
+
+  Widget _modeFooter() {
+    if (!_autoMode) {
+      // Deliberately tiny and quiet, but always there.
+      return Center(
+        child: TapCursor(
+          onTap: _confirmSwitchToConnector,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.computer, size: 11, color: Colors.grey[400]),
+              const SizedBox(width: 4),
+              Text('Marble Connector Desktop',
+                  style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+            ]),
+          ),
+        ),
+      );
+    }
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(children: [
+        Expanded(
+          child: _footerButton(Icons.help_outline, 'Instructions',
+              () => _openConnectorSetup(instructionsOnly: true)),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _footerButton(
+              Icons.swap_horiz, 'Switch to manual', _confirmSwitchToManual),
+        ),
+      ]),
+    );
+  }
+
+  Widget _footerButton(IconData icon, String label, VoidCallback onTap) {
+    return TapCursor(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        decoration: BoxDecoration(
+          color: YellorLight,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 16, color: YellorDark),
+          const SizedBox(width: 6),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w500, color: YellorDark)),
+        ]),
+      ),
+    );
+  }
+
   void _showSettings() {
     showModalBottomSheet(
       context: context,
@@ -946,7 +1121,11 @@ class _BatteryScreenState extends State<BatteryScreen>
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 255, 255, 248),
       body: SafeArea(
-        child: Column(children: [_topBar(), Expanded(child: _body())]),
+        child: Column(children: [
+          _topBar(),
+          Expanded(child: _body()),
+          if (!_isGuest && teamNum != null) _modeFooter(),
+        ]),
       ),
     );
   }
@@ -1145,7 +1324,7 @@ class _BatteryScreenState extends State<BatteryScreen>
             ),
           ]),
         ),
-        if (picked != null)
+        if (picked != null && !_autoMode)
           Column(children: [
             TapCursor(
               onTap: () => _toggleCharging(picked!),
@@ -1302,7 +1481,7 @@ class _BatteryScreenState extends State<BatteryScreen>
             ),
           ],
         ])),
-        if (!_isGuest) ...[
+        if (!_isGuest && !_autoMode) ...[
           TapCursor(
             onTap: () => _toggleCharging(battery),
             child: Container(

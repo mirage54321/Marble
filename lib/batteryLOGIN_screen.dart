@@ -168,6 +168,9 @@ class _BatteryLoginScreenState extends State<BatteryLoginScreen>
           guest: false,
           teamName: data['teamName'] as String?,
         );
+        // Tells the battery screen to ask about Marble Connector Desktop once.
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('battery_connector_ask_$team', true);
         if (!mounted) return;
         Navigator.pushReplacement(
           context,
