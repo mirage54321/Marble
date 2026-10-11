@@ -1335,6 +1335,49 @@ app.post('/battery/telemetry/assign', async (req, res) => {
   }
 });
 
+app.post('/battery/rename', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const label = cleanString(req.body.label);
+    if (!label) return res.status(400).json({ error: 'label is required' });
+
+    // The label (B1, B2...) stays the permanent ID everywhere. This is only a
+    // display nickname. An empty name clears it and goes back to the label.
+    const name = (cleanString(req.body.name) || '').slice(0, 10).trim();
+
+    const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
+    if (!battery) return res.status(404).json({ error: 'Battery not found' });
+
+    if (!name) {
+      await batteriesCollection.updateOne(
+        { teamNumber: team.teamNumber, label },
+        { $unset: { name: '' } },
+      );
+      return res.json({ ok: true, name: null });
+    }
+
+    const lower = name.toLowerCase();
+    const others = await batteriesCollection
+      .find({ teamNumber: team.teamNumber, label: { $ne: label } })
+      .toArray();
+    const taken = others.some(
+      (o) => o.label.toLowerCase() === lower || (o.name || '').toLowerCase() === lower,
+    );
+    if (taken) return res.status(409).json({ error: 'Another battery already has that name' });
+
+    await batteriesCollection.updateOne(
+      { teamNumber: team.teamNumber, label },
+      { $set: { name } },
+    );
+    res.json({ ok: true, name });
+  } catch (err) {
+    console.error('Rename battery error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/battery/flag', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
@@ -1461,7 +1504,7 @@ app.post('/battery/recommend', async (req, res) => {
                 )
                 .join('\n');
 
-        return `${battery.label}: ${status}, ${lastUsedText}, telemetry: ${health.status} (${health.reason}; ${health.matchCount} logs), ${flagText}`;
+        return `${battery.label}${battery.name ? ` (nicknamed ${JSON.stringify(battery.name)})` : ''}: ${status}, ${lastUsedText}, telemetry: ${health.status} (${health.reason}; ${health.matchCount} logs), ${flagText}`;
       })
       .join('\n\n');
 
@@ -1474,7 +1517,8 @@ app.post('/battery/recommend', async (req, res) => {
       `- Ignore positive or neutral notes when looking for problems. Treat notes about low or 0 voltage, dying mid-match, brownouts, swelling, or overheating as serious.\n` +
       `- Recent notes matter more than old ones. One serious recent problem outweighs many old or positive notes.\n` +
       `- Strongly prefer fully charged/available batteries over ones still charging.\n` +
-      `- If batteries are otherwise equal, prefer the one used least recently so use is spread evenly.\n\n` +
+      `- If batteries are otherwise equal, prefer the one used least recently so use is spread evenly.\n` +
+      `- If a battery has a nickname, use the nickname (not the B-number) when you write the reason.\n\n` +
       `Respond ONLY with valid JSON, no markdown, and recommendedLabel must be one of the labels above:\n` +
       `{"recommendedLabel":"B1","reason":"one sentence under 15 words, mention the note that mattered if any"}`;
 

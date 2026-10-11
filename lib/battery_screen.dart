@@ -99,6 +99,7 @@ class PendingBatteryAction {
 
 class Battery {
   final String label;
+  String? name; // optional nickname; label stays the permanent ID
   DateTime lastUsedAt;
   DateTime? chargedAt;
   final List<FlagEntry> flags;
@@ -107,6 +108,7 @@ class Battery {
 
   Battery({
     required this.label,
+    this.name,
     required this.lastUsedAt,
     required this.chargedAt,
     required this.flags,
@@ -119,6 +121,7 @@ class Battery {
     final chargedAtRaw = json['chargedAt'] as String?;
     return Battery(
       label: json['label'] as String? ?? '',
+      name: json['name'] as String?,
       lastUsedAt: DateTime.parse(json['lastUsedAt'] as String),
       chargedAt: chargedAtRaw != null ? DateTime.tryParse(chargedAtRaw) : null,
       flags: flagsJson.map((f) => FlagEntry.fromJson(f as Map<String, dynamic>)).toList(),
@@ -126,6 +129,9 @@ class Battery {
       isInUse: json['isInUse'] as bool? ?? false,
     );
   }
+
+  String get displayName =>
+      (name != null && name!.trim().isNotEmpty) ? name!.trim() : label;
 
   Duration get timeSinceCharged {
     if (chargedAt != null) return DateTime.now().difference(chargedAt!);
@@ -472,6 +478,25 @@ class _BatteryScreenState extends State<BatteryScreen>
                   }))
               .timeout(const Duration(seconds: 10));
           break;
+        case 'rename':
+          res = await http
+              .post(Uri.parse('$_base/battery/rename'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({
+                    'teamNumber': teamNum,
+                    'passcode': _passcode,
+                    'label': action.label,
+                    'name': action.note ?? '',
+                  }))
+              .timeout(const Duration(seconds: 10));
+          // Name taken or battery gone: retrying would never work, so drop it
+          // (the next refresh puts the real name back).
+          if (res.statusCode == 400 ||
+              res.statusCode == 404 ||
+              res.statusCode == 409) {
+            return true;
+          }
+          break;
         case 'add':
           res = await http
               .post(Uri.parse('$_base/battery/add'),
@@ -581,7 +606,7 @@ class _BatteryScreenState extends State<BatteryScreen>
         builder: (ctx) => AlertDialog(
           title: const Text('Still cooling down'),
           content: Text(
-              '${battery.label} was just used. Give it '
+              '${battery.displayName} was just used. Give it '
               '${_fmtCeilMinutes(battery.cooldownRemaining ?? Duration.zero)} more to cool '
               'before charging. Charge anyway?'),
           actions: [
@@ -645,7 +670,7 @@ class _BatteryScreenState extends State<BatteryScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Flag ${battery.label}?'),
+        title: Text('Flag ${battery.displayName}?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -686,6 +711,63 @@ class _BatteryScreenState extends State<BatteryScreen>
     );
   }
 
+  Future<void> _renameBattery(Battery battery) async {
+    if (_isGuest) return;
+    final ctrl = TextEditingController(text: battery.name ?? '');
+    String? error;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: Text('Rename ${battery.displayName}'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            maxLength: 10,
+            textCapitalization: TextCapitalization.words,
+            decoration: InputDecoration(
+              labelText: 'Name',
+              hintText: 'e.g. Barbra',
+              helperText: 'Leave empty to go back to ${battery.label}',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              errorText: error,
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () {
+                final name = ctrl.text.trim();
+                final lower = name.toLowerCase();
+                final taken = name.isNotEmpty &&
+                    _batteries.any((b) =>
+                        b.label != battery.label &&
+                        (b.label.toLowerCase() == lower ||
+                            (b.name ?? '').toLowerCase() == lower));
+                if (taken) {
+                  setD(() => error = 'Another battery already has that name');
+                  return;
+                }
+                Navigator.pop(ctx, name);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    if (result == (battery.name ?? '')) return;
+    setState(() => battery.name = result.isEmpty ? null : result);
+    await _dispatchAction(PendingBatteryAction(
+      id: '${DateTime.now().microsecondsSinceEpoch}',
+      type: 'rename',
+      label: battery.label,
+      note: result,
+      queuedAt: DateTime.now(),
+    ));
+  }
+
   Future<void> _addBattery() async {
     if (_isGuest) return;
     await _dispatchAction(PendingBatteryAction(
@@ -707,7 +789,7 @@ class _BatteryScreenState extends State<BatteryScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${battery.label} flags',
+            Text('${battery.displayName} flags',
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
             const SizedBox(height: 14),
             ...battery.flags.reversed.map((flag) => Padding(
@@ -1247,8 +1329,15 @@ class _BatteryScreenState extends State<BatteryScreen>
       // Guests can't use the AI endpoint (needs a passcode), so they keep the simple local pick.
       if (_isGuest) _topPick(recommended!) else _aiHeader(),
       const SizedBox(height: 16),
-      Text('All batteries',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.grey[600])),
+      Row(children: [
+        Expanded(
+          child: Text('All batteries',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.grey[600])),
+        ),
+        if (!_isGuest)
+          Text('tap a name to rename',
+              style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+      ]),
       const SizedBox(height: 8),
       ..._batteries.map(_batteryTile),
       const SizedBox(height: 12),
@@ -1291,7 +1380,7 @@ class _BatteryScreenState extends State<BatteryScreen>
                     color: Colors.white.withValues(alpha: 0.8),
                     letterSpacing: 0.5)),
             const SizedBox(height: 4),
-            Text(_recommendedLabel!,
+            Text(picked?.displayName ?? _recommendedLabel!,
                 style: const TextStyle(
                     fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
             if (picked != null) ...[
@@ -1388,7 +1477,7 @@ class _BatteryScreenState extends State<BatteryScreen>
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
                     color: Colors.white.withValues(alpha: 0.8), letterSpacing: 0.5)),
             const SizedBox(height: 4),
-            Text(battery.label,
+            Text(battery.displayName,
                 style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
             const SizedBox(height: 3),
             Text(_statusLabel(battery),
@@ -1447,16 +1536,24 @@ class _BatteryScreenState extends State<BatteryScreen>
         border: Border.all(color: Colors.black.withValues(alpha: 0.07), width: 0.5),
       ),
       child: Row(children: [
-        Container(
-          width: 58, height: 46,
-          decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
-          alignment: Alignment.center,
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Text(battery.label,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
-            if (battery.isInUse)
-              const Text('IN USE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
-          ]),
+        TapCursor(
+          onTap: () => _renameBattery(battery),
+          child: Container(
+            width: 58, height: 46,
+            decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(battery.displayName,
+                    maxLines: 1,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+              ),
+              if (battery.isInUse)
+                const Text('IN USE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
+            ]),
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
