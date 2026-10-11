@@ -69,10 +69,10 @@ class _MatchEventsTabState extends State<MatchEventsTab> {
         final live = filtered.where((e) => e.isLiveNow).toList()..sort(compare);
         final liveKeys = live.map((e) => e.key).toSet();
         final upcoming = filtered
-            .where((e) => !liveKeys.contains(e.key) && (e.endDate == null || !e.endDate!.isBefore(now)))
+            .where((e) => !liveKeys.contains(e.key) && !e.isOver)
             .toList()..sort(compare);
         final past = filtered
-            .where((e) => !liveKeys.contains(e.key) && e.endDate != null && e.endDate!.isBefore(now))
+            .where((e) => !liveKeys.contains(e.key) && e.isOver)
             .toList()..sort(compare);
 
         return RefreshIndicator(

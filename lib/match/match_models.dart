@@ -36,6 +36,15 @@ class MatchInfo {
 
   DateTime? get bestTime => predictedTime ?? actualTime;
 
+  /// "Red 3" / "Blue 1" for the given team, or null if it isn't in this match.
+  String? slotLabel(String teamKey) {
+    final redIdx = redTeams.indexOf(teamKey);
+    if (redIdx != -1) return 'Red ${redIdx + 1}';
+    final blueIdx = blueTeams.indexOf(teamKey);
+    if (blueIdx != -1) return 'Blue ${blueIdx + 1}';
+    return null;
+  }
+
   String get label {
     switch (compLevel) {
       case 'p':
@@ -159,6 +168,15 @@ class MatchEvent {
           .where((part) => part.isNotEmpty)
           .join(', '),
     );
+  }
+
+  /// True only after the END DATE has fully finished. TBA gives end_date as
+  /// midnight at the start of the last day, so comparing against it directly
+  /// marked the event "over" for the whole final day (quals + playoffs).
+  bool get isOver {
+    final end = endDate;
+    if (end == null) return false;
+    return DateTime.now().isAfter(end.add(const Duration(days: 1)));
   }
 
   bool get isLiveNow {

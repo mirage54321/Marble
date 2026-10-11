@@ -194,12 +194,14 @@ const NOTIFY_WINDOW_MIN = 12;
 const FINAL_SCORE_WINDOW_MIN = 180;
 
 
+// Windows are measured in minutes until the match's predicted start. Each is
+// wide enough that a cron hitting /push/check every 5-10 min can't skip one.
 const NOTIFY_STAGES = [
-  { stage: 'alliance', minMinutesAway: 15, maxMinutesAway: 20 },
-  { stage: 'queue', minMinutesAway: 10, maxMinutesAway: 15 },
-  { stage: 'matchup', minMinutesAway: 5, maxMinutesAway: 10 },
-  { stage: 'field', minMinutesAway: 0, maxMinutesAway: 5 },
-  { stage: 'start', minMinutesAway: -NOTIFY_WINDOW_MIN, maxMinutesAway: 0 },
+  { stage: 'alliance', minMinutesAway: 20, maxMinutesAway: 30 }, // color/number + teammates
+  { stage: 'queue', minMinutesAway: 10, maxMinutesAway: 20 },    // time to queue
+  { stage: 'matchup', minMinutesAway: 5, maxMinutesAway: 10 },   // win % + opponents
+  { stage: 'field', minMinutesAway: 0, maxMinutesAway: 5 },      // starting in 5 min
+  { stage: 'start', minMinutesAway: -NOTIFY_WINDOW_MIN, maxMinutesAway: 0 }, // starting now
 ];
 
 function stageForMinutesAway(minsAway) {
@@ -274,39 +276,40 @@ function finalScoreSummary(match, teamKey) {
 }
 
 function notificationForStage(teamNumber, label, stage, extra = {}) {
+  const mins = Math.max(1, Math.round(extra.minsAway ?? 0));
   switch (stage) {
     case 'alliance': {
       const teammates = (extra.teammates || []).map((n) => `Team ${n}`);
-      return {
-        title: `Team ${teamNumber}: ${label} in 20 min`,
-        body: teammates.length
-          ? `Your alliance this match: you + ${joinWithAnd(teammates)}.`
-          : "Your match is coming up in 20 minutes. Alliance info isn't available yet.",
-      };
-    }
-    case 'queue': {
       const slot = extra.slotLabel;
+      const parts = [];
+      if (slot) parts.push(`You're ${slot}.`);
+      if (teammates.length) parts.push(`Your teammates: ${joinWithAnd(teammates)}.`);
       return {
-        title: `Team ${teamNumber}: ${label} in 15 min`,
-        body: slot
-          ? `You're on queue. You'll be ${slot} this match.`
-          : "You're on queue. Head to the queuing line.",
+        title: `Team ${teamNumber}: ${label} in ${mins} min`,
+        body: parts.length ? parts.join(' ') : `Your match is coming up in ${mins} minutes. Alliance info isn't available yet.`,
       };
     }
+    case 'queue':
+      return {
+        title: `Team ${teamNumber}: ${label} in ${mins} min`,
+        body: extra.slotLabel
+          ? `Time to queue. You're ${extra.slotLabel} this match.`
+          : 'Time to queue. Head to the queuing line.',
+      };
     case 'matchup': {
       const { winProbPct, topOpponentNumber } = extra;
       const parts = [];
       if (winProbPct != null) parts.push(`You have about a ${winProbPct}% chance of winning this match.`);
       if (topOpponentNumber) parts.push(`Watch Team ${topOpponentNumber} on the other alliance. They're projected to contribute the most, so they're the one to defend.`);
       return {
-        title: `Team ${teamNumber}: ${label} in 10 min`,
-        body: parts.length ? parts.join(' ') : 'Your match is coming up in 10 minutes.',
+        title: `Team ${teamNumber}: ${label} in ${mins} min`,
+        body: parts.length ? parts.join(' ') : `Your match is coming up in ${mins} minutes.`,
       };
     }
     case 'field':
       return {
-        title: `Team ${teamNumber}: ${label} in 5 min`,
-        body: 'Be on the field. Your match starts in 5 minutes.',
+        title: `Team ${teamNumber}: ${label} in ${mins} min`,
+        body: `Be on the field. Your match starts in ${mins} minutes.`,
       };
     case 'start':
       return {
@@ -1907,7 +1910,7 @@ app.get('/push/check', async (req, res) => {
 
           let extra = {};
           if (stage === 'alliance') {
-            extra = { teammates: allianceTeammates(match, teamKey) };
+            extra = { teammates: allianceTeammates(match, teamKey), slotLabel: allianceSlotLabel(match, teamKey) };
           } else if (stage === 'queue') {
             extra = { slotLabel: allianceSlotLabel(match, teamKey) };
           } else if (stage === 'matchup') {
@@ -1918,6 +1921,7 @@ app.get('/push/check', async (req, res) => {
               extra = {};
             }
           }
+          extra.minsAway = minsAway;
 
           const { title, body } = notificationForStage(teamNumber, label(match), stage, extra);
           const tagSeed = stageMatchKey;

@@ -60,7 +60,7 @@ class MyTeam {
     final now = DateTime.now();
     final upcoming =
         events
-            .where((e) => e.endDate == null || !e.endDate!.isBefore(now))
+            .where((e) => !e.isOver)
             .toList()
           ..sort(
             (a, b) => (a.startDate ?? DateTime(2100)).compareTo(
@@ -140,6 +140,52 @@ class MatchDataController extends ChangeNotifier {
     }
   }
 
+  Timer? _pollTimer;
+  bool _polling = false;
+
+  /// TBA publishes new predicted times / scores constantly during an event, but
+  /// the app only ever fetched once. Poll quietly (no spinner) so the countdown
+  /// follows the real schedule when matches run early or late.
+  void startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 45), (_) => pollSilently());
+  }
+
+  Future<void> pollSilently() async {
+    final t = myTeam;
+    if (t == null || t.selectedEventKey == null || _polling) return;
+    final event = t.selectedEvent;
+    // Only poll while an event is actually happening.
+    if (event != null && !event.isLiveNow) return;
+    _polling = true;
+    try {
+      final uri = Uri.parse(
+        '$backendBase/match/data?teamNumber=${t.teamNumber}&eventKey=${t.selectedEventKey}',
+      );
+      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final loaded = (data['matches'] as List<dynamic>? ?? [])
+          .map((m) => MatchInfo.fromJson(m as Map<String, dynamic>))
+          .toList()
+        ..sort((a, b) {
+          final at = a.bestTime;
+          final bt = b.bestTime;
+          if (at == null && bt == null) return a.matchNumber.compareTo(b.matchNumber);
+          if (at == null) return 1;
+          if (bt == null) return -1;
+          return at.compareTo(bt);
+        });
+      t.matches = loaded;
+      t.myStatus = TeamStatus.fromJson(data['status'] as Map<String, dynamic>?);
+      notifyListeners();
+    } catch (_) {
+      // Keep showing the last good data.
+    } finally {
+      _polling = false;
+    }
+  }
+
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getString('my_team_number');
@@ -156,6 +202,7 @@ class MatchDataController extends ChangeNotifier {
     await bootstrap(myTeam!);
     isLoading = false;
     notifyListeners();
+    startPolling();
   }
 
   Future<void> setMyTeam(String teamNumber) async {
@@ -170,6 +217,7 @@ class MatchDataController extends ChangeNotifier {
 
     await bootstrap(myTeam!);
     notifyListeners();
+    startPolling();
   }
 
   Future<void> clearMyTeam() async {

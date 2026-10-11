@@ -290,10 +290,12 @@ class _MyTeamTabState extends State<MyTeamTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('No matches scheduled yet', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: MatchColors.yellorDark)),
+                Text(event.isLiveNow ? 'Event in progress' : 'No matches scheduled yet', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: MatchColors.yellorDark)),
                 const SizedBox(height: 2),
                 Text(
-                  days == null
+                  event.isLiveNow
+                      ? '${event.name}: no more matches are posted for your team right now. This updates automatically.'
+                      : days == null
                       ? 'Next up: ${event.name}'
                       : days <= 0
                           ? 'Next up: ${event.name} (today)'
@@ -468,7 +470,22 @@ class _MyTeamTabState extends State<MyTeamTab> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(m.label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              Row(
+                children: [
+                  Text(m.label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  if (m.slotLabel(team.teamKey) != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(color: myColor, borderRadius: BorderRadius.circular(6)),
+                      child: Text(
+                        m.slotLabel(team.teamKey)!,
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
               if (winProb != null)
                 Text(
                   '${(winProb * 100).round()}% win chance',

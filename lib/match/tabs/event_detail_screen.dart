@@ -30,11 +30,7 @@ class EventDetailScreenState extends State<EventDetailScreen> {
   bool loadingResults = true;
   bool resultsFailed = false;
 
-  bool get isPastEvent {
-    final end = widget.event.endDate;
-    if (end == null) return false;
-    return end.isBefore(DateTime.now());
-  }
+  bool get isPastEvent => widget.event.isOver;
 
   @override
   void initState() {
