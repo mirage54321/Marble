@@ -6,7 +6,6 @@ A toolkit built for FRC robotics teams: AI-powered inspection and rules checking
 
 This is just the README, **[view full documentation here!](https://github.com/mirage54321/Marble/blob/main/DOCUMENTATION.md)**
 
-**[Look at Stardance project!](https://stardance.hackclub.com/projects/16179)**
 
 ---
 
