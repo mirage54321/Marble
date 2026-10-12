@@ -12,7 +12,12 @@ self.addEventListener('push', function (event) {
     icon: data.icon || 'icons/Icon-111.png',
     badge: data.badge || 'icons/Icon-111.png',
     data: { url: data.url || '/' },
+    tag: data.tag,
+    renotify: Boolean(data.renotify),
   };
+  if (Array.isArray(data.vibrate)) {
+    options.vibrate = data.vibrate;
+  }
   event.waitUntil(self.registration.showNotification(title, options));
 });
 

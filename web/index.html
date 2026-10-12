@@ -27,6 +27,7 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="AI robot inspection, rules checking, battery tracking, and match alerts for FRC teams.">
 
   <!-- iOS meta tags & icons -->
@@ -40,8 +41,203 @@
 
   <title>Marble</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Pre-boot loading screen styles: this is plain CSS, not Flutter, so it
+       can paint before the Flutter engine has even started downloading. -->
+  <style>
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #fffff8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      transition: opacity 300ms ease-out;
+      opacity: 1;
+      z-index: 9999;
+    }
+    #loading.loading-hide {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Scouting-radar loading screen: a rotating sweep over concentric rings,
+       with pulsing blips and a ticking "scouting" counter underneath. */
+    #loading .loading-radar {
+      position: relative;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+    }
+    #loading .ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, 0.09);
+    }
+    #loading .ring.r1 { inset: 0; }
+    #loading .ring.r2 { inset: 24px; }
+    #loading .ring.r3 { inset: 48px; }
+    #loading .ring.r4 { inset: 72px; }
+    #loading .crossline {
+      position: absolute;
+      background: rgba(0, 0, 0, 0.09);
+    }
+    #loading .crossline.h { left: 0; right: 0; top: 50%; height: 1px; }
+    #loading .crossline.v { top: 0; bottom: 0; left: 50%; width: 1px; }
+    #loading .sweep {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(
+        from 0deg,
+        rgba(0, 179, 172, 0) 0deg,
+        rgba(0, 179, 172, 0.03) 8deg,
+        rgba(0, 179, 172, 0.08) 18deg,
+        rgba(0, 179, 172, 0.16) 30deg,
+        rgba(0, 179, 172, 0.28) 42deg,
+        rgba(0, 179, 172, 0.42) 50deg,
+        rgba(0, 179, 172, 0) 65deg,
+        transparent 100deg
+      );
+      animation: loading-sweep-rot 2.8s linear infinite;
+    }
+    @keyframes loading-sweep-rot {
+      to { transform: rotate(360deg); }
+    }
+    #loading .blip {
+      position: absolute;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+    }
+    #loading .blip::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      background: inherit;
+      opacity: 0.35;
+      animation: loading-blip-ping 2.8s ease-out infinite;
+    }
+    #loading .blip.b1 { top: 32%; left: 62%; background: #CF2879; }
+    #loading .blip.b1::after { animation-delay: 0.15s; }
+    #loading .blip.b2 { top: 58%; left: 28%; background: #FFC107; }
+    #loading .blip.b2::after { animation-delay: 0.9s; }
+    #loading .blip.b3 { top: 70%; left: 66%; background: #FFA007; }
+    #loading .blip.b3::after { animation-delay: 1.7s; }
+    #loading .blip.b4 { top: 40%; left: 40%; background: #00B3AC; }
+    #loading .blip.b4::after { animation-delay: 2.3s; }
+    @keyframes loading-blip-ping {
+      0% { transform: scale(0.4); opacity: 0.5; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+    #loading .loading-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #1a1a1a;
+    }
+    #loading .loading-wordmark {
+      margin-top: 20px;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: #1a1a1a;
+    }
+    #loading .loading-wordmark .letter-l { color: #CF2879; }
+    #loading .loading-wordmark .letter-e { color: #00B3AC; }
+    #loading .loading-wordmark .letter-n { color: #FFC107; }
+    #loading .loading-wordmark .letter-s { color: #FFA007; }
+    #loading .loading-readout {
+      margin-top: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: rgba(0, 0, 0, 0.4);
+      font-variant-numeric: tabular-nums;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #loading .sweep { animation: none; opacity: 0; }
+      #loading .blip::after { animation: none; opacity: 0; }
+    }
+  </style>
 </head>
 <body>
+  <!-- Shown immediately on page load, removed once Flutter paints its first
+       frame (see the flutter-first-frame listener below). This is what you
+       actually see during the white/blank flash before Flutter boots. -->
+  <div id="loading">
+    <div class="loading-radar">
+      <div class="ring r1"></div>
+      <div class="ring r2"></div>
+      <div class="ring r3"></div>
+      <div class="ring r4"></div>
+      <div class="crossline h"></div>
+      <div class="crossline v"></div>
+      <div class="sweep"></div>
+      <div class="blip b1"></div>
+      <div class="blip b2"></div>
+      <div class="blip b3"></div>
+      <div class="blip b4"></div>
+      <div class="loading-center"></div>
+    </div>
+    <div class="loading-wordmark">Ma<span class="letter-l">r</span><span class="letter-e">b</span><span class="letter-n">l</span><span class="letter-s">e</span></div>
+    <div class="loading-readout" id="loading-readout">Scouting 0 teams</div>
+  </div>
+  <script>
+    (function () {
+      var el = document.getElementById('loading-readout');
+      var target = 128;
+      var n = 0;
+      var timer = setInterval(function () {
+        n += 7;
+        if (n > target) n = 0;
+        el.textContent = 'Scouting ' + n + ' team' + (n === 1 ? '' : 's');
+      }, 90);
+      window.addEventListener('flutter-first-frame', function () {
+        clearInterval(timer);
+      });
+    })();
+  </script>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var loadingEl = document.getElementById('loading');
+      if (!loadingEl) return;
+      loadingEl.classList.add('loading-hide');
+      setTimeout(function () { loadingEl.remove(); }, 300);
+    });
+  </script>
+
+  <script>
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        window.location.reload();
+      });
+      navigator.serviceWorker.ready.then(function (reg) {
+        if (reg.waiting) {
+          reg.waiting.postMessage('skipWaiting');
+        }
+        reg.addEventListener('updatefound', function () {
+          var newWorker = reg.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener('statechange', function () {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              newWorker.postMessage('skipWaiting');
+            }
+          });
+        });
+      }).catch(function () {});
+    }
+  </script>
+
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

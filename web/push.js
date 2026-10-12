@@ -1,4 +1,5 @@
 
+
 window.matchPush = (function () {
   let swRegistration = null;
 
@@ -53,6 +54,7 @@ window.matchPush = (function () {
       await ensureRegistered();
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') return 'permission-denied';
+
     const configResponse = await fetch(`${backendBase}/push/config`);
     if (!configResponse.ok) return 'server-not-configured';
     const config = await configResponse.json();
@@ -68,7 +70,12 @@ window.matchPush = (function () {
     const res = await fetch(`${backendBase}/push/subscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ teamNumber, eventKey, subscription: sub.toJSON() }),
+      body: JSON.stringify({
+        teamNumber,
+        eventKey,
+        subscription: sub.toJSON(),
+        platform: isIos() ? 'ios' : 'web',
+      }),
     });
     return res.ok ? 'subscribed' : 'server-rejected';
     } catch (error) {
