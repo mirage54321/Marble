@@ -51158,14 +51158,14 @@ n=A.al(12)
 m=q?"Charging":"Mark charging"
 s.push(A.aF(A.b([new A.bI(A.ag(k,A.O(m,k,k,k,k,A.a9(k,k,q?B.f:B.a0,k,k,k,k,k,k,k,k,13,k,k,B.z,k,k,!0,k,k,k,k,k,k,k,k),k,k),B.j,k,k,new A.ai(r,k,k,n,k,k,B.q),k,k,k,B.mk,k,k,k),new A.avT(j,l),k,k),B.aU,new A.bI(A.O("Flag weak",k,k,k,k,A.a9(k,k,B.f.aH(0.85),k,k,k,k,k,k,k,k,12,k,k,k,k,k,!0,k,k,k,k,k,k,k,k),k,k),new A.avU(j,l),k,k)],o),B.n,B.i,B.l))}p=A.aR(s,B.n,B.i,B.l,0)}else p=A.aF(A.b([A.O("WHICH BATTERY?",k,k,k,k,A.a9(k,k,B.f.aH(0.8),k,k,k,k,k,k,k,k,11,k,k,B.z,k,k,!0,k,0.5,k,k,k,k,k,k),k,k),B.b6,new A.bI(A.ag(k,B.a0F,B.j,k,k,new A.ai(B.f,k,k,A.al(14),k,k,B.q),k,k,k,B.mj,k,k,1/0),l.gU0(),k,k)],t.p),B.C,B.i,B.l)
 return A.ag(k,p,B.j,k,k,new A.ai(B.J,k,k,A.al(20),k,k,B.q),k,k,k,B.d1,k,k,1/0)},
-aw5(a){var s,r,q=this,p=null,o=A.al(20),n=t.p,m=A.b([A.O("RECOMMENDED BATTERY",p,p,p,p,A.a9(p,p,B.f.aH(0.8),p,p,p,p,p,p,p,p,11,p,p,B.z,p,p,!0,p,0.5,p,p,p,p,p,p),p,p),B.b0,A.O(a.grh(),p,p,p,p,B.EM,p,p),B.ie,A.O(q.Mt(a),p,p,p,p,A.a9(p,p,q.Ms(a),p,p,p,p,p,p,p,p,12,p,p,B.a5,p,p,!0,p,p,p,p,p,p,p,p),p,p),B.dO,A.O(q.Up(a),p,p,p,p,A.a9(p,p,B.f.aH(0.9),p,p,p,p,p,p,p,p,13,p,p,p,p,p,!0,p,p,p,p,p,p,p,p),p,p)],n),l=a.e
-if(l.length!==0){s=B.f.aH(0.25)
+aw5(a){var s,r,q,p=this,o=null,n=A.al(20),m=t.p,l=A.b([A.O("RECOMMENDED BATTERY",o,o,o,o,A.a9(o,o,B.f.aH(0.8),o,o,o,o,o,o,o,o,11,o,o,B.z,o,o,!0,o,0.5,o,o,o,o,o,o),o,o),B.b0,A.O(a.grh(),o,o,o,o,B.EM,o,o),B.ie,A.O(p.Mt(a),o,o,o,o,A.a9(o,o,p.Ms(a),o,o,o,o,o,o,o,o,12,o,o,B.a5,o,o,!0,o,o,o,o,o,o,o,o),o,o),B.dO,A.O(p.Up(a),o,o,o,o,A.a9(o,o,B.f.aH(0.9),o,o,o,o,o,o,o,o,13,o,o,o,o,o,!0,o,o,o,o,o,o,o,o),o,o)],m)
+if(!p.z&&a.e.length!==0){s=B.f.aH(0.25)
 r=A.al(20)
-B.c.P(m,A.b([B.c0,new A.bI(A.ag(p,A.O("Flagged "+l.length+"x",p,p,p,p,B.a63,p,p),B.j,p,p,new A.ai(s,p,p,r,p,p,B.q),p,p,p,B.ml,p,p,p),new A.ax8(q,a),p,p)],n))}m=A.b([A.bv(A.aF(m,B.C,B.i,B.l),1)],n)
-if(!q.y){l=a.f&&!a.gk0()?B.cF:B.f
-s=A.al(12)
-r=a.f&&!a.gk0()?"Charging":"Mark charging"
-m.push(A.aF(A.b([new A.bI(A.ag(p,A.O(r,p,p,p,p,A.a9(p,p,a.f&&!a.gk0()?B.f:B.a0,p,p,p,p,p,p,p,p,13,p,p,B.z,p,p,!0,p,p,p,p,p,p,p,p),p,p),B.j,p,p,new A.ai(l,p,p,s,p,p,B.q),p,p,p,B.mk,p,p,p),new A.ax9(q,a),p,p),B.aU,new A.bI(A.O("Flag weak",p,p,p,p,A.a9(p,p,B.f.aH(0.85),p,p,p,p,p,p,p,p,12,p,p,p,p,p,!0,p,p,p,p,p,p,p,p),p,p),new A.axa(q,a),p,p)],n),B.n,B.i,B.l))}return A.ag(p,A.aR(m,B.n,B.i,B.l,0),B.j,p,p,new A.ai(B.J,p,p,o,p,p,B.q),p,p,p,B.d1,p,p,p)},
+B.c.P(l,A.b([B.c0,new A.bI(A.ag(o,A.O("Flagged "+a.e.length+"x",o,o,o,o,B.a63,o,o),B.j,o,o,new A.ai(s,o,o,r,o,o,B.q),o,o,o,B.ml,o,o,o),new A.ax8(p,a),o,o)],m))}l=A.b([A.bv(A.aF(l,B.C,B.i,B.l),1)],m)
+if(!p.y){s=a.f&&!a.gk0()?B.cF:B.f
+r=A.al(12)
+q=a.f&&!a.gk0()?"Charging":"Mark charging"
+l.push(A.aF(A.b([new A.bI(A.ag(o,A.O(q,o,o,o,o,A.a9(o,o,a.f&&!a.gk0()?B.f:B.a0,o,o,o,o,o,o,o,o,13,o,o,B.z,o,o,!0,o,o,o,o,o,o,o,o),o,o),B.j,o,o,new A.ai(s,o,o,r,o,o,B.q),o,o,o,B.mk,o,o,o),new A.ax9(p,a),o,o),B.aU,new A.bI(A.O("Flag weak",o,o,o,o,A.a9(o,o,B.f.aH(0.85),o,o,o,o,o,o,o,o,12,o,o,o,o,o,!0,o,o,o,o,o,o,o,o),o,o),new A.axa(p,a),o,o)],m),B.n,B.i,B.l))}return A.ag(o,A.aR(l,B.n,B.i,B.l,0),B.j,o,o,new A.ai(B.J,o,o,n,o,o,B.q),o,o,o,B.d1,o,o,o)},
 afQ(a){var s,r,q,p,o=this,n=null,m=o.z&&!o.as,l=m?B.lT:o.Ms(a),k=A.al(16),j=A.cS(B.p.aH(0.07),-1,0.5),i=A.al(12),h=t.p,g=A.b([new A.Qc(B.Gt,A.O(a.grh(),1,n,n,n,B.a6K,n,n),n)],h)
 if(a.r&&!m)g.push(B.a9t)
 i=A.ag(B.V,A.aF(g,B.n,B.bA,B.l),B.j,n,n,new A.ai(l,n,n,i,n,n,B.q),n,46,n,B.ht,n,n,58)
@@ -51173,8 +51173,7 @@ g=m?"WAITING FOR CONNECTION":o.Mt(a)
 g=A.O(g,n,n,n,n,A.a9(n,n,l,n,n,n,n,n,n,n,n,12,n,n,B.a5,n,n,!0,n,n,n,n,n,n,n,n),n,n)
 s=m?"Waiting for Marble Connector Desktop":o.Up(a)
 g=A.b([g,B.dO,A.O(s,n,n,n,n,A.a9(n,n,m?B.U:n,n,n,n,n,n,n,n,n,13,n,n,B.z,n,n,!0,n,n,n,n,n,n,n,n),n,n)],h)
-s=a.e.length
-if(s!==0)B.c.P(g,A.b([B.ie,new A.bI(A.O("flagged "+s+"x, tap to view",n,n,n,n,B.a7l,n,n),new A.aw2(o,a),n,n)],h))
+if(!o.z&&a.e.length!==0)B.c.P(g,A.b([B.ie,new A.bI(A.O("flagged "+a.e.length+"x, tap to view",n,n,n,n,B.a7l,n,n),new A.aw2(o,a),n,n)],h))
 i=A.b([new A.bI(i,new A.aw3(o,a),n,n),B.cc,A.bv(A.aF(g,B.C,B.i,B.l),1)],h)
 if(!o.y&&!o.Q){if(a.f&&!a.gk0())g=B.cF
 else g=a.guH()!=null?B.et.aH(0.15):B.ad

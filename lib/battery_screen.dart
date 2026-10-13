@@ -200,6 +200,10 @@ class _BatteryScreenState extends State<BatteryScreen>
   // nothing trustworthy to show yet, so say so instead of showing old status.
   bool get _waitingForCollector => _teamAuto && !_collectorConnected;
 
+  // Flags are a manual-mode feature (people leave them by hand). Automatic
+  // teams never see them, guests included.
+  bool get _showFlags => !_teamAuto;
+
   String? _recommendedLabel;
   String? _recommendReason;
   bool _loadingRecommendation = false;
@@ -1646,7 +1650,7 @@ class _BatteryScreenState extends State<BatteryScreen>
             const SizedBox(height: 2),
             Text(_chargedLabel(battery),
                 style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.9))),
-            if (battery.flags.isNotEmpty) ...[
+            if (_showFlags && battery.flags.isNotEmpty) ...[
               const SizedBox(height: 6),
               TapCursor(
                 onTap: () => _viewFlags(battery),
@@ -1727,7 +1731,7 @@ class _BatteryScreenState extends State<BatteryScreen>
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
                   color: waiting ? Colors.grey[500] : null)),
-          if (battery.flags.isNotEmpty) ...[
+          if (_showFlags && battery.flags.isNotEmpty) ...[
             const SizedBox(height: 3),
             TapCursor(
               onTap: () => _viewFlags(battery),
