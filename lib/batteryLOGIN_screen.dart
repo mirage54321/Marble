@@ -124,7 +124,9 @@ class _BatteryLoginScreenState extends State<BatteryLoginScreen>
         );
       } else {
         setState(() {
-          _loginError = 'Wrong team number or passcode';
+          _loginError = res.statusCode == 429
+              ? 'Too many wrong attempts. Wait a few minutes and try again'
+              : 'Wrong team number or passcode';
           _loading = false;
         });
       }

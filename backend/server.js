@@ -12,7 +12,9 @@ const {
 } = require('./ratingModel');
 const FIRST_USERNAME = process.env.FIRST_USERNAME;
 const FIRST_TOKEN = process.env.FIRST_TOKEN;
+const crypto = require('crypto');
 const app = express();
+app.set('trust proxy', 1); // Render sits in front: req.ip must be the real client for rate limiting
 
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -194,14 +196,12 @@ const NOTIFY_WINDOW_MIN = 12;
 const FINAL_SCORE_WINDOW_MIN = 180;
 
 
-// Windows are measured in minutes until the match's predicted start. Each is
-// wide enough that a cron hitting /push/check every 5-10 min can't skip one.
 const NOTIFY_STAGES = [
-  { stage: 'alliance', minMinutesAway: 20, maxMinutesAway: 30 }, // color/number + teammates
-  { stage: 'queue', minMinutesAway: 10, maxMinutesAway: 20 },    // time to queue
-  { stage: 'matchup', minMinutesAway: 5, maxMinutesAway: 10 },   // win % + opponents
-  { stage: 'field', minMinutesAway: 0, maxMinutesAway: 5 },      // starting in 5 min
-  { stage: 'start', minMinutesAway: -NOTIFY_WINDOW_MIN, maxMinutesAway: 0 }, // starting now
+  { stage: 'alliance', minMinutesAway: 20, maxMinutesAway: 30 },
+  { stage: 'queue', minMinutesAway: 10, maxMinutesAway: 20 },
+  { stage: 'matchup', minMinutesAway: 5, maxMinutesAway: 10 },
+  { stage: 'field', minMinutesAway: 0, maxMinutesAway: 5 },
+  { stage: 'start', minMinutesAway: -NOTIFY_WINDOW_MIN, maxMinutesAway: 0 },
 ];
 
 function stageForMinutesAway(minsAway) {
@@ -397,7 +397,7 @@ if (!MONGODB_URI) {
 const corsOptions = {
   origin: FRONTEND_ORIGIN,
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'X-Reports-Admin-Secret'],
+  allowedHeaders: ['Content-Type', 'X-Reports-Admin-Secret', 'X-Team-Passcode'],
 };
 
 app.use(cors(corsOptions));
@@ -455,6 +455,20 @@ async function connectToMongo() {
   await reportsCollection.createIndex({ scanId: 1, findingId: 1 });
   await worldRatingsCollection.createIndex({ refreshedAt: -1 });
   await eventTeamsCollection.createIndex({ refreshedAt: -1 });
+
+  // Before the mode lived on the server it was only saved on each phone. Teams
+  // that already import robot logs keep working; everyone else starts manual.
+  const logTeams = await batteryTelemetryCollection.distinct('teamNumber', { source: 'wpilog' });
+  if (logTeams.length) {
+    await teamsCollection.updateMany(
+      { teamNumber: { $in: logTeams }, batteryMode: { $exists: false } },
+      { $set: { batteryMode: 'auto', batteryModeSetAt: new Date().toISOString() } },
+    );
+  }
+  await teamsCollection.updateMany(
+    { batteryMode: { $exists: false } },
+    { $set: { batteryMode: 'manual' } },
+  );
 
   console.log(`Connected to MongoDB database: ${DB_NAME}`);
 }
@@ -548,9 +562,136 @@ async function getTeam(teamNumber) {
   return teamsCollection.findOne({ teamNumber: cleanedTeamNumber });
 }
 
+// ---------- passcodes ----------
+// Stored as a salted scrypt hash. Older teams still have a plain-text
+// "passcode" field: it keeps working and is replaced by a hash on the first
+// successful login. The passcode can come from the body, the query string
+// (older app versions) or the X-Team-Passcode header (headers don't end up in
+// URL logs, so new clients use that).
+const scrypt = require('util').promisify(crypto.scrypt);
+const VERIFY_KEY = crypto.randomBytes(32); // per process: only used for the cache below
+const verifiedCache = new Map(); // teamNumber -> digest of the last passcode that passed
+
+async function hashPasscode(passcode) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = (await scrypt(passcode, salt, 32)).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function safeEqual(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+// Phones poll every few seconds. scrypt is deliberately slow, so a passcode
+// that already passed is remembered (as a keyed digest, never the passcode).
+// The digest includes the stored hash, so changing the passcode invalidates it.
+function verifyDigest(team, passcode) {
+  return crypto.createHmac('sha256', VERIFY_KEY)
+    .update(`${team.teamNumber}\n${team.passcodeHash || team.passcode || ''}\n${passcode}`)
+    .digest('hex');
+}
+
+async function passcodeMatches(team, passcode) {
+  if (!team || !passcode) return false;
+  const digest = verifyDigest(team, passcode);
+  if (verifiedCache.get(team.teamNumber) === digest) return true;
+
+  let ok = false;
+  if (team.passcodeHash) {
+    const [salt, hash] = String(team.passcodeHash).split(':');
+    const actual = await scrypt(passcode, salt, 32);
+    ok = safeEqual(actual.toString('hex'), hash);
+  } else if (typeof team.passcode === 'string') {
+    ok = safeEqual(team.passcode, passcode);
+    if (ok) {
+      // Upgrade the stored plain-text passcode to a hash.
+      const passcodeHash = await hashPasscode(passcode);
+      await teamsCollection.updateOne(
+        { teamNumber: team.teamNumber, passcode: team.passcode },
+        { $set: { passcodeHash }, $unset: { passcode: '' } },
+      );
+      team.passcodeHash = passcodeHash;
+      delete team.passcode;
+      verifiedCache.set(team.teamNumber, verifyDigest(team, passcode));
+      return true;
+    }
+  }
+  if (ok) verifiedCache.set(team.teamNumber, digest);
+  return ok;
+}
+
+function readPasscode(req) {
+  return cleanString(
+    (req.body && req.body.passcode) || (req.query && req.query.passcode) || req.get('x-team-passcode'),
+  );
+}
+
+// Wrong-passcode attempts are counted per client+team and per client. Past the
+// limit the answer is 429 for a while, even if the next guess is right.
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_LIMIT_PER_TEAM = 10;
+const AUTH_LIMIT_PER_IP = 60;
+const authFailures = new Map(); // key -> { count, since }
+
+function failureCount(key) {
+  const entry = authFailures.get(key);
+  if (!entry) return 0;
+  if (Date.now() - entry.since > AUTH_WINDOW_MS) {
+    authFailures.delete(key);
+    return 0;
+  }
+  return entry.count;
+}
+
+function authIsBlocked(req, teamNumber) {
+  return failureCount(`team:${req.ip}|${teamNumber}`) >= AUTH_LIMIT_PER_TEAM
+    || failureCount(`ip:${req.ip}`) >= AUTH_LIMIT_PER_IP;
+}
+
+function recordAuthFailure(req, teamNumber) {
+  for (const key of [`team:${req.ip}|${teamNumber}`, `ip:${req.ip}`]) {
+    const entry = authFailures.get(key);
+    if (entry && Date.now() - entry.since <= AUTH_WINDOW_MS) entry.count += 1;
+    else authFailures.set(key, { count: 1, since: Date.now() });
+  }
+}
+
+function clearAuthFailures(req, teamNumber) {
+  authFailures.delete(`team:${req.ip}|${teamNumber}`);
+}
+
+setInterval(() => {
+  for (const key of authFailures.keys()) failureCount(key); // drops expired entries
+}, 10 * 60 * 1000).unref();
+
+function sendRateLimited(res) {
+  res.status(429).json({
+    code: 'RATE_LIMITED',
+    error: 'Too many wrong attempts. Wait a few minutes and try again.',
+  });
+}
+
+// Shared by checkTeamAuth and the battery list route. Returns true when the
+// passcode is right; otherwise it has already answered (401 or 429).
+async function authenticate(req, res, team, teamNumber, passcode) {
+  if (authIsBlocked(req, teamNumber)) {
+    sendRateLimited(res);
+    return false;
+  }
+  if (!(await passcodeMatches(team, passcode))) {
+    recordAuthFailure(req, teamNumber);
+    res.status(401).json({ error: 'Invalid team number or passcode' });
+    return false;
+  }
+  clearAuthFailures(req, teamNumber);
+  return true;
+}
+
 async function checkTeamAuth(req, res) {
   const teamNumber = cleanString(req.body.teamNumber || req.query.teamNumber);
-  const passcode = cleanString(req.body.passcode || req.query.passcode);
+  const passcode = readPasscode(req);
 
   if (!teamNumber || !passcode) {
     res.status(400).json({ error: 'teamNumber and passcode required' });
@@ -558,11 +699,7 @@ async function checkTeamAuth(req, res) {
   }
 
   const team = await getTeam(teamNumber);
-  if (!team || team.passcode !== passcode) {
-    res.status(401).json({ error: 'Invalid team number or passcode' });
-    return null;
-  }
-
+  if (!(await authenticate(req, res, team, teamNumber, passcode))) return null;
   return team;
 }
 
@@ -953,6 +1090,93 @@ app.get('/reports/summary', async (req, res) => {
   }
 });
 
+// ---------- Marble Connector Desktop (automatic mode) ----------
+// A team is either "manual" (people tap Use / Charge) or "auto" (Marble Connector
+// Desktop reads robot logs and the phone just shows the result). The mode is
+// stored on the team, so every phone and the desktop app agree on it, and the
+// desktop app is only allowed to connect while the team is in auto mode.
+const CONNECTOR_ONLINE_MS = 60 * 1000; // the desktop app checks in about every 15 s
+
+function teamMode(team) {
+  return team && team.batteryMode === 'auto' ? 'auto' : 'manual';
+}
+
+function isCollectorRequest(req) {
+  const client = cleanString((req.body && req.body.client) || (req.query && req.query.client));
+  return client === 'collector';
+}
+
+function connectorIsOnline(team) {
+  if (teamMode(team) !== 'auto' || !team.connectorLastSeenAt) return false;
+  return Date.now() - new Date(team.connectorLastSeenAt).getTime() < CONNECTOR_ONLINE_MS;
+}
+
+function requireAutoMode(team, res) {
+  if (teamMode(team) === 'auto') return true;
+  res.status(403).json({
+    code: 'NOT_AUTOMATIC',
+    error: 'This team is not set to Marble Connector Desktop. In the Marble app, open the Battery tracker and switch to Marble Connector Desktop first.',
+  });
+  return false;
+}
+
+async function touchConnector(team) {
+  team.connectorLastSeenAt = new Date().toISOString();
+  await teamsCollection.updateOne(
+    { teamNumber: team.teamNumber },
+    { $set: { connectorLastSeenAt: team.connectorLastSeenAt } },
+  );
+}
+
+function rejectIfAutoMode(team, res) {
+  if (teamMode(team) !== 'auto') return false;
+  res.status(409).json({
+    code: 'AUTO_MODE',
+    error: 'This team tracks batteries with Marble Connector Desktop. Switch back to manual to use this.',
+  });
+  return true;
+}
+
+app.post('/battery/mode', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const mode = cleanString(req.body.mode);
+    if (mode !== 'auto' && mode !== 'manual') {
+      return res.status(400).json({ error: "mode must be 'auto' or 'manual'" });
+    }
+
+    const update = { batteryMode: mode, batteryModeSetAt: new Date().toISOString() };
+    // Whatever connected before no longer counts: it has to connect again.
+    const unset = { connectorLastSeenAt: '' };
+    await teamsCollection.updateOne(
+      { teamNumber: team.teamNumber },
+      { $set: update, $unset: unset },
+    );
+    res.json({ ok: true, mode });
+  } catch (err) {
+    console.error('Battery mode error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// The desktop app calls this when someone signs out of it.
+app.post('/battery/connector/disconnect', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+    await teamsCollection.updateOne(
+      { teamNumber: team.teamNumber },
+      { $unset: { connectorLastSeenAt: '' } },
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Connector disconnect error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/battery/register', async (req, res) => {
   try {
     const teamNumber = cleanString(req.body.teamNumber);
@@ -975,12 +1199,13 @@ const teamName = await getFIRSTTeamName(teamNumber);
 
     await teamsCollection.insertOne({
       teamNumber,
-      passcode,
+      passcodeHash: await hashPasscode(passcode),
       teamName,
+      batteryMode: 'manual',
       createdAt: new Date().toISOString(),
     });
 
-    res.json({ ok: true, teamName });
+    res.json({ ok: true, teamName, mode: 'manual' });
   } catch (err) {
     console.error('Register error:', err);
 
@@ -997,7 +1222,12 @@ app.post('/battery/login', async (req, res) => {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
 
-    res.json({ ok: true, teamName: team.teamName || null });
+    if (isCollectorRequest(req)) {
+      if (!requireAutoMode(team, res)) return;
+      await touchConnector(team);
+    }
+
+    res.json({ ok: true, teamName: team.teamName || null, mode: teamMode(team) });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: err.message });
@@ -1035,7 +1265,7 @@ app.post('/battery/changePasscode', async (req, res) => {
 
     await teamsCollection.updateOne(
       { teamNumber: team.teamNumber },
-      { $set: { passcode: newPasscode } },
+      { $set: { passcodeHash: await hashPasscode(newPasscode) }, $unset: { passcode: '' } },
     );
 
     res.json({ ok: true });
@@ -1065,7 +1295,7 @@ app.post('/battery/reset', async (req, res) => {
 app.get('/battery/list', async (req, res) => {
   try {
     const teamNumber = cleanString(req.query.teamNumber);
-    const passcode = cleanString(req.query.passcode);
+    const passcode = readPasscode(req);
     const guest = req.query.guest === 'true';
 
     if (!teamNumber) {
@@ -1077,8 +1307,11 @@ app.get('/battery/list', async (req, res) => {
       return res.status(404).json({ error: 'Team not found' });
     }
 
-    if (!guest && team.passcode !== passcode) {
-      return res.status(401).json({ error: 'Invalid team number or passcode' });
+    if (!guest && !(await authenticate(req, res, team, teamNumber, passcode))) return;
+
+    if (!guest && isCollectorRequest(req)) {
+      if (!requireAutoMode(team, res)) return;
+      await touchConnector(team);
     }
 
     const batteries = await batteriesCollection
@@ -1086,7 +1319,13 @@ app.get('/battery/list', async (req, res) => {
       .sort({ lastUsedAt: 1 })
       .toArray();
 
-    res.json({ batteries, teamName: team.teamName || null });
+    res.json({
+      batteries,
+      teamName: team.teamName || null,
+      mode: teamMode(team),
+      connectorConnected: connectorIsOnline(team),
+      competitionId: team.batteryCompetitionId || 'legacy',
+    });
   } catch (err) {
     console.error('List error:', err);
     res.status(500).json({ error: err.message });
@@ -1098,19 +1337,35 @@ app.post('/battery/add', async (req, res) => {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
 
-    const count = await batteriesCollection.countDocuments({ teamNumber: team.teamNumber });
-    const label = `B${count + 1}`;
-    const battery = {
-      teamNumber: team.teamNumber,
-      label,
-      lastUsedAt: new Date(0).toISOString(),
-      flags: [],
-      isCharging: false,
-      isInUse: false,
-      createdAt: new Date().toISOString(),
-    };
+    // Next number after the highest one in use. Counting batteries instead
+    // would reuse a number after a delete (delete B2 of 3, then "B3" exists).
+    const existing = await batteriesCollection
+      .find({ teamNumber: team.teamNumber }, { projection: { label: 1 } })
+      .toArray();
+    let next = existing.reduce((max, b) => {
+      const m = /^B(\d+)$/i.exec(b.label || '');
+      return m ? Math.max(max, Number(m[1])) : max;
+    }, 0) + 1;
 
-    await batteriesCollection.insertOne(battery);
+    let battery;
+    for (let attempt = 0; attempt < 5; attempt++, next++) {
+      battery = {
+        teamNumber: team.teamNumber,
+        label: `B${next}`,
+        lastUsedAt: new Date(0).toISOString(),
+        flags: [],
+        isCharging: false,
+        isInUse: false,
+        createdAt: new Date().toISOString(),
+      };
+      try {
+        await batteriesCollection.insertOne(battery);
+        break;
+      } catch (err) {
+        // Two phones adding at once can pick the same number: try the next one.
+        if (err.code !== 11000 || attempt === 4) throw err;
+      }
+    }
     res.json({ battery });
   } catch (err) {
     console.error('Add battery error:', err);
@@ -1127,6 +1382,7 @@ app.post('/battery/use', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
+    if (rejectIfAutoMode(team, res)) return;
 
     const label = cleanString(req.body.label);
     if (!label) {
@@ -1162,6 +1418,7 @@ app.post('/battery/charging', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
+    if (rejectIfAutoMode(team, res)) return;
 
     const label = cleanString(req.body.label);
     if (!label) {
@@ -1249,6 +1506,24 @@ app.post('/battery/telemetry', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
+
+    // Uploads from robot logs come from Marble Connector Desktop, which is only
+    // allowed on teams that switched to it. Manual entries from the app are fine.
+    if (req.body.source === 'wpilog') {
+      if (!requireAutoMode(team, res)) return;
+      await touchConnector(team);
+    }
+
+    // The desktop app says which competition a log was collected for. If the
+    // team has started a new one since (New comp / start fresh), the old log
+    // must not land in it.
+    const sentCompetition = cleanString(req.body.competitionId);
+    if (sentCompetition && sentCompetition !== (team.batteryCompetitionId || 'legacy')) {
+      return res.status(410).json({
+        code: 'COMPETITION_CHANGED',
+        error: 'This log was collected before the team started a new competition.',
+      });
+    }
 
     const unassigned = req.body.unassigned === true;
     const label = unassigned ? '' : cleanString(req.body.label);
@@ -1423,6 +1698,15 @@ app.delete('/battery/:label', async (req, res) => {
       teamNumber: team.teamNumber,
       label: req.params.label,
     });
+    if (result.deletedCount > 0) {
+      // Otherwise its robot-log history would show up under the next battery
+      // that gets this label.
+      await batteryTelemetryCollection.deleteMany({
+        teamNumber: team.teamNumber,
+        competitionId: team.batteryCompetitionId || 'legacy',
+        label: req.params.label,
+      });
+    }
 
     res.json({ ok: true, deletedCount: result.deletedCount });
   } catch (err) {

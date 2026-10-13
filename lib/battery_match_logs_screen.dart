@@ -153,23 +153,20 @@ class _BatteryMatchLogsScreenState extends State<BatteryMatchLogsScreen> {
     try {
       final batteriesResponse = await http
           .get(
-            Uri.parse(
-              '$_apiBase/battery/list?teamNumber=$team&passcode=$passcode',
-            ),
+            Uri.parse('$_apiBase/battery/list?teamNumber=$team'),
+            headers: {'X-Team-Passcode': passcode},
           )
           .timeout(const Duration(seconds: 15));
       final telemetryResponse = await http
           .get(
-            Uri.parse(
-              '$_apiBase/battery/telemetry?teamNumber=$team&passcode=$passcode',
-            ),
+            Uri.parse('$_apiBase/battery/telemetry?teamNumber=$team'),
+            headers: {'X-Team-Passcode': passcode},
           )
           .timeout(const Duration(seconds: 15));
       final healthResponse = await http
           .get(
-            Uri.parse(
-              '$_apiBase/battery/health?teamNumber=$team&passcode=$passcode',
-            ),
+            Uri.parse('$_apiBase/battery/health?teamNumber=$team'),
+            headers: {'X-Team-Passcode': passcode},
           )
           .timeout(const Duration(seconds: 15));
       if (batteriesResponse.statusCode != 200 ||

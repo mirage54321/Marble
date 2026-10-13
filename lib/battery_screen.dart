@@ -189,8 +189,16 @@ class _BatteryScreenState extends State<BatteryScreen>
   String? teamName;
   bool _isGuest = false;
 
-  // true = Marble Connector Desktop mode (manual buttons hidden)
-  bool _autoMode = false;
+  // The team's mode lives on the server (so every phone and the desktop app
+  // agree). true = Marble Connector Desktop mode (manual buttons hidden).
+  bool _teamAuto = false;
+  bool _autoMode = false; // _teamAuto, but never for guests (they have no buttons anyway)
+  // Whether Marble Connector Desktop has checked in recently (server says).
+  bool _collectorConnected = false;
+
+  // Automatic team, but the desktop app is not connected: batteries have
+  // nothing trustworthy to show yet, so say so instead of showing old status.
+  bool get _waitingForCollector => _teamAuto && !_collectorConnected;
 
   String? _recommendedLabel;
   String? _recommendReason;
@@ -279,14 +287,17 @@ class _BatteryScreenState extends State<BatteryScreen>
     _passcode = pass;
     _isGuest = guest;
     teamName = savedTeamName;
-    _autoMode = !guest && prefs.getString('battery_mode_$team') == 'auto';
+    // Only a cache so the right screen shows instantly; the server decides.
+    _teamAuto = prefs.getString('battery_mode_$team') == 'auto';
+    _autoMode = !guest && _teamAuto;
     await _loadPending();
     await _loadBatteries();
     if (mounted) _startPolling();
 
     // Set by the register screen right after a brand-new account is made.
+    // The flag is only cleared once the question has been answered, so closing
+    // the app before the dialog shows doesn't lose it.
     if (!guest && prefs.getBool('battery_connector_ask_$team') == true) {
-      await prefs.remove('battery_connector_ask_$team');
       if (mounted) {
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _askConnectorFirstTime());
@@ -306,9 +317,13 @@ class _BatteryScreenState extends State<BatteryScreen>
     try {
       final uri = _isGuest
           ? Uri.parse('$_base/battery/list?teamNumber=$teamNum&guest=true')
-          : Uri.parse('$_base/battery/list?teamNumber=$teamNum&passcode=$_passcode');
+          : Uri.parse('$_base/battery/list?teamNumber=$teamNum');
 
-      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      // The passcode goes in a header, not the URL, so it never lands in server logs.
+      final res = await http
+          .get(uri,
+              headers: _isGuest ? null : {'X-Team-Passcode': _passcode ?? ''})
+          .timeout(const Duration(seconds: 15));
 
       if (res.statusCode == 401) { await _logout(); return; }
       if (res.statusCode == 404) {
@@ -329,6 +344,9 @@ class _BatteryScreenState extends State<BatteryScreen>
       }
 
       final rawList = data['batteries'] as List<dynamic>? ?? [];
+
+      await _applyServerMode(
+          data['mode'] as String?, data['connectorConnected'] == true);
 
       if (silent && startMutations != _mutations) return;
 
@@ -352,7 +370,7 @@ class _BatteryScreenState extends State<BatteryScreen>
         }
       });
 
-      if (!silent && _autoMode && !_isGuest) {
+      if (!silent && _autoMode && _collectorConnected && !_isGuest) {
         unawaited(_askAiRecommendation());
       }
 
@@ -373,6 +391,39 @@ class _BatteryScreenState extends State<BatteryScreen>
       } else {
         setState(() { _error = 'Could not connect, try again'; _isLoading = false; });
       }
+    }
+  }
+
+  // Applies the mode and connection state the server reported. Runs on every
+  // poll, so a switch made on another phone, or the desktop app connecting or
+  // disconnecting, shows up within a few seconds.
+  Future<void> _applyServerMode(String? mode, bool connected) async {
+    if (mode == null || !mounted) return;
+    final auto = mode == 'auto';
+    final nowConnected = auto && connected;
+    final modeChanged = auto != _teamAuto;
+    final wasConnected = _collectorConnected;
+
+    if (modeChanged || nowConnected != _collectorConnected) {
+      setState(() {
+        _teamAuto = auto;
+        _autoMode = auto && !_isGuest;
+        _collectorConnected = nowConnected;
+        if (modeChanged || !nowConnected) {
+          _recommendedLabel = null;
+          _recommendReason = null;
+        }
+      });
+    }
+    if (modeChanged) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
+      } catch (_) {}
+    }
+    // The desktop app just connected: now there is something to recommend from.
+    if (_autoMode && nowConnected && !wasConnected && !_isGuest) {
+      unawaited(_askAiRecommendation());
     }
   }
 
@@ -507,6 +558,13 @@ class _BatteryScreenState extends State<BatteryScreen>
         default:
           return true; 
       }
+      // The team switched to Marble Connector Desktop after this tap was
+      // queued. Marble no longer takes it, and retrying would block every
+      // action queued behind it, so drop it.
+      if ((action.type == 'use' || action.type == 'charging') &&
+          res.statusCode == 409) {
+        return true;
+      }
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -578,6 +636,17 @@ class _BatteryScreenState extends State<BatteryScreen>
     await prefs.remove('battery_passcode');
     await prefs.remove('battery_guest');
     await prefs.remove('battery_team_name');
+    // Leaving a team also forgets what was kept for it on this device: its
+    // cached batteries, taps that never synced, and its mode. Otherwise a
+    // shared device keeps showing the team's batteries after logging out.
+    final team = teamNum;
+    if (team != null) {
+      await prefs.remove('battery_cache_$team');
+      await prefs.remove('battery_cache_${team}_time');
+      await prefs.remove('battery_pending_$team');
+      await prefs.remove('battery_mode_$team');
+      await prefs.remove('battery_connector_ask_$team');
+    }
     if (!mounted) return;
     Navigator.pushReplacement(context,
         MaterialPageRoute(builder: (_) => const BatteryLoginScreen()));
@@ -635,7 +704,7 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Future<void> _askAiRecommendation() async {
-    if (_isGuest || _batteries.isEmpty) return;
+    if (_isGuest || _batteries.isEmpty || _waitingForCollector) return;
     setState(() => _loadingRecommendation = true);
     try {
       final res = await http.post(Uri.parse('$_base/battery/recommend'),
@@ -931,16 +1000,40 @@ class _BatteryScreenState extends State<BatteryScreen>
       'Marble then just shows your batteries and which one to use, with no '
       'buttons to tap.';
 
-  Future<void> _setMode(bool auto) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
-    if (!mounted) return;
+  // Saves the mode on the server. Only when that works does the screen change,
+  // so the phone, other phones and the desktop app can never disagree.
+  Future<bool> _setMode(bool auto) async {
+    try {
+      final res = await http
+          .post(Uri.parse('$_base/battery/mode'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'teamNumber': teamNum,
+                'passcode': _passcode,
+                'mode': auto ? 'auto' : 'manual',
+              }))
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) throw StateError('mode ${res.statusCode}');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not change the mode, check your connection and try again')));
+      }
+      return false;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
+    } catch (_) {}
+    if (!mounted) return true;
     setState(() {
-      _autoMode = auto;
+      _teamAuto = auto;
+      _autoMode = auto && !_isGuest;
+      _collectorConnected = false; // it has to (re)connect after a switch
       _recommendedLabel = null;
       _recommendReason = null;
     });
-    if (auto) unawaited(_askAiRecommendation());
+    return true;
   }
 
   Future<bool> _openConnectorSetup({bool instructionsOnly = false}) async {
@@ -955,12 +1048,32 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Future<void> _startConnectorSetup() async {
+    final wasAuto = _teamAuto;
+    // Automatic mode goes on BEFORE the setup steps: Marble only lets the
+    // desktop app connect to a team that is already in automatic mode.
+    if (!wasAuto && !await _setMode(true)) return;
     final done = await _openConnectorSetup();
-    if (done && mounted) await _setMode(true);
+    // Backed out of setup and nothing ever connected: undo, so the team is not
+    // left "waiting for connection" for a computer that does not exist.
+    if (!done && !wasAuto && mounted && !_collectorConnected) {
+      await _setMode(false);
+    }
+  }
+
+  Future<void> _clearConnectorAsk() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('battery_connector_ask_$teamNum');
+    } catch (_) {}
   }
 
   Future<void> _askConnectorFirstTime() async {
     if (!mounted) return;
+    // Already switched on (for example from another phone): nothing to ask.
+    if (_teamAuto) {
+      await _clearConnectorAsk();
+      return;
+    }
     final yes = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -978,11 +1091,11 @@ class _BatteryScreenState extends State<BatteryScreen>
         ],
       ),
     );
+    await _clearConnectorAsk();
     if (yes == true) {
       await _startConnectorSetup();
-    } else {
-      await _setMode(false);
     }
+    // "No": new teams already start in manual mode on the server.
   }
 
   Future<void> _confirmSwitchToConnector() async {
@@ -1032,6 +1145,8 @@ class _BatteryScreenState extends State<BatteryScreen>
     // Instructions and Switch to manual, stacked.
     final buttons = _autoMode
         ? <Widget>[
+            _connectionStatus(),
+            const SizedBox(height: 6),
             _footerButton(Icons.help_outline, 'Instructions',
                 () => _openConnectorSetup(instructionsOnly: true)),
             const SizedBox(height: 6),
@@ -1053,6 +1168,16 @@ class _BatteryScreenState extends State<BatteryScreen>
         ),
       ),
     );
+  }
+
+  Widget _connectionStatus() {
+    final ok = _collectorConnected;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(Icons.circle, size: 9, color: ok ? greenChar : grayChar),
+      const SizedBox(width: 6),
+      Text(ok ? 'Desktop app connected' : 'Waiting for desktop app',
+          style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+    ]);
   }
 
   Widget _footerButton(IconData icon, String label, VoidCallback onTap) {
@@ -1327,7 +1452,12 @@ class _BatteryScreenState extends State<BatteryScreen>
       if (_error != null) _offlineBanner(_error!),
       if (_pending.isNotEmpty) _pendingBanner(),
       // Guests can't use the AI endpoint (needs a passcode), so they keep the simple local pick.
-      if (_isGuest) _topPick(recommended!) else _aiHeader(),
+      if (_waitingForCollector)
+        _waitingCard()
+      else if (_isGuest)
+        _topPick(recommended!)
+      else
+        _aiHeader(),
       const SizedBox(height: 16),
       Row(children: [
         Expanded(
@@ -1344,6 +1474,37 @@ class _BatteryScreenState extends State<BatteryScreen>
       if (!_isGuest) _addButton(),
       const SizedBox(height: 16),
     ]);
+  }
+
+  Widget _waitingCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('WAITING FOR CONNECTION',
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withValues(alpha: 0.8),
+                letterSpacing: 0.5)),
+        const SizedBox(height: 8),
+        Row(children: [
+          const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+                _isGuest
+                    ? 'This team tracks batteries with Marble Connector Desktop, and it is not connected right now.'
+                    : 'Open Marble Connector Desktop on your computer and sign in as team $teamNum. Your batteries show up here as soon as it connects.',
+                style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.95))),
+          ),
+        ]),
+      ]),
+    );
   }
 
   Widget _aiHeader() {
@@ -1526,7 +1687,8 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Widget _batteryTile(Battery battery) {
-    final statusColor = _statusColor(battery);
+    final waiting = _waitingForCollector;
+    final statusColor = waiting ? grayChar : _statusColor(battery);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -1550,18 +1712,21 @@ class _BatteryScreenState extends State<BatteryScreen>
                     maxLines: 1,
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
               ),
-              if (battery.isInUse)
+              if (battery.isInUse && !waiting)
                 const Text('IN USE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
             ]),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(_statusLabel(battery),
+          Text(waiting ? 'WAITING FOR CONNECTION' : _statusLabel(battery),
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusColor)),
           const SizedBox(height: 2),
-          Text(_chargedLabel(battery),
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          Text(waiting ? 'Waiting for Marble Connector Desktop' : _chargedLabel(battery),
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: waiting ? Colors.grey[500] : null)),
           if (battery.flags.isNotEmpty) ...[
             const SizedBox(height: 3),
             TapCursor(
