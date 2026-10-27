@@ -69,9 +69,6 @@ Bookmark any team from around the app to add it to your saved list, then subscri
 | External data | The Blue Alliance API, FRC Events API |
 | Notifications | Web Push API, service workers, VAPID |
 
-## AI usage disclosure
-
-I used Gemini as the AI model that powers the scanning, rules checking, and battery recommendation tools. The Team Stats & Match Center doesn't use AI at all, it's built entirely on data from The Blue Alliance and FRC Events APIs. I used Claude to help debug issues and learn how to write parts of the Flutter/Dart code I wasn't familiar with yet, especially UI work, since Flutter had a steep learning curve for me.
 
 ## Why I built this
 
