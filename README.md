@@ -1,6 +1,7 @@
 # Marble
 
 A toolkit built for FRC robotics teams: AI-powered inspection and rules checking, a shared battery tracker, and a live Team Stats & Match Center with match alerts.
+(formerly named RoboLens)
 
 **[Try it live!](https://mirage54321.github.io/Marble/)**
 
