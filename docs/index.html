@@ -22,7 +22,20 @@
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
 
-  gtag('config', 'G-557T7EVY1M');
+ 
+  var gaTestMode = location.search.indexOf('testmode') !== -1;
+
+  if (gaTestMode) {
+    var fakeId = (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : String(Math.random()).slice(2) + '.' + Date.now();
+    gtag('config', 'G-557T7EVY1M', {
+      client_id: fakeId,
+      client_storage: 'none'
+    });
+  } else {
+    gtag('config', 'G-557T7EVY1M');
+  }
 </script>
   <script src="push.js"></script>
   <base href="/Marble/">
