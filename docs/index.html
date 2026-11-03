@@ -22,10 +22,21 @@
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
 
- 
+  // TEST MODE: visit https://yoursite/Marble/?testmode and every load gets
+  // a brand-new random client ID, so GA4 counts each reload as a new user.
+  // Normal visitors (no ?testmode in the URL) are tracked normally.
   var gaTestMode = location.search.indexOf('testmode') !== -1;
 
   if (gaTestMode) {
+    // Wipe any saved GA cookies so GA4 can't reuse the old ID.
+    document.cookie.split(';').forEach(function (c) {
+      var name = c.split('=')[0].trim();
+      if (name.indexOf('_ga') === 0) {
+        document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+        document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=' + location.hostname;
+      }
+    });
+
     var fakeId = (window.crypto && crypto.randomUUID)
       ? crypto.randomUUID()
       : String(Math.random()).slice(2) + '.' + Date.now();
