@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'batteryLOGIN_screen.dart';
-// import 'connector_setup_screen.dart'; // CONNECTOR DISABLED: not finished yet
+import 'connector_setup_screen.dart';
 
 const Yellor = Color(0xFFFFC107);
 const YellorLight = Color(0xFFFFF4E5);
@@ -189,21 +189,20 @@ class _BatteryScreenState extends State<BatteryScreen>
   String? teamName;
   bool _isGuest = false;
 
-  // CONNECTOR DISABLED: automatic-mode state (flags now always show, like manual mode)
-  // // The team's mode lives on the server (so every phone and the desktop app
-  // // agree). true = Marble Connector Desktop mode (manual buttons hidden).
-  // bool _teamAuto = false;
-  // bool _autoMode = false; // _teamAuto, but never for guests (they have no buttons anyway)
-  // // Whether Marble Connector Desktop has checked in recently (server says).
-  // bool _collectorConnected = false;
+  // The team's mode lives on the server (so every phone and the desktop app
+  // agree). true = Marble Connector Desktop mode (manual buttons hidden).
+  bool _teamAuto = false;
+  bool _autoMode = false; // _teamAuto, but never for guests (they have no buttons anyway)
+  // Whether Marble Connector Desktop has checked in recently (server says).
+  bool _collectorConnected = false;
 
-  // // Automatic team, but the desktop app is not connected: batteries have
-  // // nothing trustworthy to show yet, so say so instead of showing old status.
-  // bool get _waitingForCollector => _teamAuto && !_collectorConnected;
+  // Automatic team, but the desktop app is not connected: batteries have
+  // nothing trustworthy to show yet, so say so instead of showing old status.
+  bool get _waitingForCollector => _teamAuto && !_collectorConnected;
 
-  // // Flags are a manual-mode feature (people leave them by hand). Automatic
-  // // teams never see them, guests included.
-  // bool get _showFlags => !_teamAuto;
+  // Flags are a manual-mode feature (people leave them by hand). Automatic
+  // teams never see them, guests included.
+  bool get _showFlags => !_teamAuto;
 
   String? _recommendedLabel;
   String? _recommendReason;
@@ -292,24 +291,22 @@ class _BatteryScreenState extends State<BatteryScreen>
     _passcode = pass;
     _isGuest = guest;
     teamName = savedTeamName;
-    // CONNECTOR DISABLED: cached mode
-    // // Only a cache so the right screen shows instantly; the server decides.
-    // _teamAuto = prefs.getString('battery_mode_$team') == 'auto';
-    // _autoMode = !guest && _teamAuto;
+    // Only a cache so the right screen shows instantly; the server decides.
+    _teamAuto = prefs.getString('battery_mode_$team') == 'auto';
+    _autoMode = !guest && _teamAuto;
     await _loadPending();
     await _loadBatteries();
     if (mounted) _startPolling();
 
-    // CONNECTOR DISABLED: first-time "use the desktop app?" question
-    // // Set by the register screen right after a brand-new account is made.
-    // // The flag is only cleared once the question has been answered, so closing
-    // // the app before the dialog shows doesn't lose it.
-    // if (!guest && prefs.getBool('battery_connector_ask_$team') == true) {
-      // if (mounted) {
-        // WidgetsBinding.instance
-            // .addPostFrameCallback((_) => _askConnectorFirstTime());
-      // }
-    // }
+    // Set by the register screen right after a brand-new account is made.
+    // The flag is only cleared once the question has been answered, so closing
+    // the app before the dialog shows doesn't lose it.
+    if (!guest && prefs.getBool('battery_connector_ask_$team') == true) {
+      if (mounted) {
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _askConnectorFirstTime());
+      }
+    }
   }
 
   Future<void> _loadBatteries({bool silent = false}) async {
@@ -352,9 +349,8 @@ class _BatteryScreenState extends State<BatteryScreen>
 
       final rawList = data['batteries'] as List<dynamic>? ?? [];
 
-      // CONNECTOR DISABLED: server mode sync
-      // await _applyServerMode(
-          // data['mode'] as String?, data['connectorConnected'] == true);
+      await _applyServerMode(
+          data['mode'] as String?, data['connectorConnected'] == true);
 
       if (silent && startMutations != _mutations) return;
 
@@ -378,10 +374,9 @@ class _BatteryScreenState extends State<BatteryScreen>
         }
       });
 
-      // CONNECTOR DISABLED: auto AI ask
-      // if (!silent && _autoMode && _collectorConnected && !_isGuest) {
-        // unawaited(_askAiRecommendation());
-      // }
+      if (!silent && _autoMode && _collectorConnected && !_isGuest) {
+        unawaited(_askAiRecommendation());
+      }
 
       unawaited(_syncPending());
     } catch (e) {
@@ -403,39 +398,38 @@ class _BatteryScreenState extends State<BatteryScreen>
     }
   }
 
-  // CONNECTOR DISABLED: _applyServerMode
-  // // Applies the mode and connection state the server reported. Runs on every
-  // // poll, so a switch made on another phone, or the desktop app connecting or
-  // // disconnecting, shows up within a few seconds.
-  // Future<void> _applyServerMode(String? mode, bool connected) async {
-    // if (mode == null || !mounted) return;
-    // final auto = mode == 'auto';
-    // final nowConnected = auto && connected;
-    // final modeChanged = auto != _teamAuto;
-    // final wasConnected = _collectorConnected;
+  // Applies the mode and connection state the server reported. Runs on every
+  // poll, so a switch made on another phone, or the desktop app connecting or
+  // disconnecting, shows up within a few seconds.
+  Future<void> _applyServerMode(String? mode, bool connected) async {
+    if (mode == null || !mounted) return;
+    final auto = mode == 'auto';
+    final nowConnected = auto && connected;
+    final modeChanged = auto != _teamAuto;
+    final wasConnected = _collectorConnected;
 
-    // if (modeChanged || nowConnected != _collectorConnected) {
-      // setState(() {
-        // _teamAuto = auto;
-        // _autoMode = auto && !_isGuest;
-        // _collectorConnected = nowConnected;
-        // if (modeChanged || !nowConnected) {
-          // _recommendedLabel = null;
-          // _recommendReason = null;
-        // }
-      // });
-    // }
-    // if (modeChanged) {
-      // try {
-        // final prefs = await SharedPreferences.getInstance();
-        // await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
-      // } catch (_) {}
-    // }
-    // // The desktop app just connected: now there is something to recommend from.
-    // if (_autoMode && nowConnected && !wasConnected && !_isGuest) {
-      // unawaited(_askAiRecommendation());
-    // }
-  // }
+    if (modeChanged || nowConnected != _collectorConnected) {
+      setState(() {
+        _teamAuto = auto;
+        _autoMode = auto && !_isGuest;
+        _collectorConnected = nowConnected;
+        if (modeChanged || !nowConnected) {
+          _recommendedLabel = null;
+          _recommendReason = null;
+        }
+      });
+    }
+    if (modeChanged) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
+      } catch (_) {}
+    }
+    // The desktop app just connected: now there is something to recommend from.
+    if (_autoMode && nowConnected && !wasConnected && !_isGuest) {
+      unawaited(_askAiRecommendation());
+    }
+  }
 
   Future<void> _cacheBatteriesRaw(List<dynamic> rawList) async {
     try {
@@ -714,8 +708,7 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Future<void> _askAiRecommendation() async {
-    // if (_isGuest || _batteries.isEmpty || _waitingForCollector) return; // CONNECTOR DISABLED
-    if (_isGuest || _batteries.isEmpty) return;
+    if (_isGuest || _batteries.isEmpty || _waitingForCollector) return;
     setState(() => _loadingRecommendation = true);
     try {
       final res = await http.post(Uri.parse('$_base/battery/recommend'),
@@ -1005,212 +998,211 @@ class _BatteryScreenState extends State<BatteryScreen>
     );
   }
 
-  // CONNECTOR DISABLED: connector blurb, mode switching, setup, dialogs, footer buttons
-  // static const String _connectorBlurb =
-      // 'Marble Connector Desktop is a small app on your computer. It reads '
-      // 'your robot\'s match logs and keeps track of your batteries for you. '
-      // 'Marble then just shows your batteries and which one to use, with no '
-      // 'buttons to tap.';
+  static const String _connectorBlurb =
+      'Marble Connector Desktop is a small app on your computer. It reads '
+      'your robot\'s match logs and keeps track of your batteries for you. '
+      'Marble then just shows your batteries and which one to use, with no '
+      'buttons to tap.';
 
-  // // Saves the mode on the server. Only when that works does the screen change,
-  // // so the phone, other phones and the desktop app can never disagree.
-  // Future<bool> _setMode(bool auto) async {
-    // try {
-      // final res = await http
-          // .post(Uri.parse('$_base/battery/mode'),
-              // headers: {'Content-Type': 'application/json'},
-              // body: jsonEncode({
-                // 'teamNumber': teamNum,
-                // 'passcode': _passcode,
-                // 'mode': auto ? 'auto' : 'manual',
-              // }))
-          // .timeout(const Duration(seconds: 15));
-      // if (res.statusCode != 200) throw StateError('mode ${res.statusCode}');
-    // } catch (_) {
-      // if (mounted) {
-        // ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            // content: Text('Could not change the mode, check your connection and try again')));
-      // }
-      // return false;
-    // }
-    // try {
-      // final prefs = await SharedPreferences.getInstance();
-      // await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
-    // } catch (_) {}
-    // if (!mounted) return true;
-    // setState(() {
-      // _teamAuto = auto;
-      // _autoMode = auto && !_isGuest;
-      // _collectorConnected = false; // it has to (re)connect after a switch
-      // _recommendedLabel = null;
-      // _recommendReason = null;
-    // });
-    // return true;
-  // }
+  // Saves the mode on the server. Only when that works does the screen change,
+  // so the phone, other phones and the desktop app can never disagree.
+  Future<bool> _setMode(bool auto) async {
+    try {
+      final res = await http
+          .post(Uri.parse('$_base/battery/mode'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'teamNumber': teamNum,
+                'passcode': _passcode,
+                'mode': auto ? 'auto' : 'manual',
+              }))
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) throw StateError('mode ${res.statusCode}');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not change the mode, check your connection and try again')));
+      }
+      return false;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
+    } catch (_) {}
+    if (!mounted) return true;
+    setState(() {
+      _teamAuto = auto;
+      _autoMode = auto && !_isGuest;
+      _collectorConnected = false; // it has to (re)connect after a switch
+      _recommendedLabel = null;
+      _recommendReason = null;
+    });
+    return true;
+  }
 
-  // Future<bool> _openConnectorSetup({bool instructionsOnly = false}) async {
-    // final done = await Navigator.push<bool>(
-      // context,
-      // MaterialPageRoute(
-        // builder: (_) =>
-            // ConnectorSetupScreen(instructionsOnly: instructionsOnly),
-      // ),
-    // );
-    // return done == true;
-  // }
+  Future<bool> _openConnectorSetup({bool instructionsOnly = false}) async {
+    final done = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            ConnectorSetupScreen(instructionsOnly: instructionsOnly),
+      ),
+    );
+    return done == true;
+  }
 
-  // Future<void> _startConnectorSetup() async {
-    // final wasAuto = _teamAuto;
-    // // Automatic mode goes on BEFORE the setup steps: Marble only lets the
-    // // desktop app connect to a team that is already in automatic mode.
-    // if (!wasAuto && !await _setMode(true)) return;
-    // final done = await _openConnectorSetup();
-    // // Backed out of setup and nothing ever connected: undo, so the team is not
-    // // left "waiting for connection" for a computer that does not exist.
-    // if (!done && !wasAuto && mounted && !_collectorConnected) {
-      // await _setMode(false);
-    // }
-  // }
+  Future<void> _startConnectorSetup() async {
+    final wasAuto = _teamAuto;
+    // Automatic mode goes on BEFORE the setup steps: Marble only lets the
+    // desktop app connect to a team that is already in automatic mode.
+    if (!wasAuto && !await _setMode(true)) return;
+    final done = await _openConnectorSetup();
+    // Backed out of setup and nothing ever connected: undo, so the team is not
+    // left "waiting for connection" for a computer that does not exist.
+    if (!done && !wasAuto && mounted && !_collectorConnected) {
+      await _setMode(false);
+    }
+  }
 
-  // Future<void> _clearConnectorAsk() async {
-    // try {
-      // final prefs = await SharedPreferences.getInstance();
-      // await prefs.remove('battery_connector_ask_$teamNum');
-    // } catch (_) {}
-  // }
+  Future<void> _clearConnectorAsk() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('battery_connector_ask_$teamNum');
+    } catch (_) {}
+  }
 
-  // Future<void> _askConnectorFirstTime() async {
-    // if (!mounted) return;
-    // // Already switched on (for example from another phone): nothing to ask.
-    // if (_teamAuto) {
-      // await _clearConnectorAsk();
-      // return;
-    // }
-    // final yes = await showDialog<bool>(
-      // context: context,
-      // barrierDismissible: false,
-      // builder: (ctx) => AlertDialog(
-        // title: const Text('Use Marble Connector Desktop?'),
-        // content: const Text(_connectorBlurb),
-        // actions: [
-          // TextButton(
-              // onPressed: () => Navigator.pop(ctx, false),
-              // child: const Text('No, keep it manual')),
-          // FilledButton(
-              // style: FilledButton.styleFrom(backgroundColor: Yellor),
-              // onPressed: () => Navigator.pop(ctx, true),
-              // child: const Text('Yes, set it up')),
-        // ],
-      // ),
-    // );
-    // await _clearConnectorAsk();
-    // if (yes == true) {
-      // await _startConnectorSetup();
-    // }
-    // // "No": new teams already start in manual mode on the server.
-  // }
+  Future<void> _askConnectorFirstTime() async {
+    if (!mounted) return;
+    // Already switched on (for example from another phone): nothing to ask.
+    if (_teamAuto) {
+      await _clearConnectorAsk();
+      return;
+    }
+    final yes = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Use Marble Connector Desktop?'),
+        content: const Text(_connectorBlurb),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No, keep it manual')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Yellor),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Yes, set it up')),
+        ],
+      ),
+    );
+    await _clearConnectorAsk();
+    if (yes == true) {
+      await _startConnectorSetup();
+    }
+    // "No": new teams already start in manual mode on the server.
+  }
 
-  // Future<void> _confirmSwitchToConnector() async {
-    // final yes = await showDialog<bool>(
-      // context: context,
-      // builder: (ctx) => AlertDialog(
-        // title: const Text('Switch to Marble Connector Desktop?'),
-        // content: const Text(_connectorBlurb),
-        // actions: [
-          // TextButton(
-              // onPressed: () => Navigator.pop(ctx, false),
-              // child: const Text('Cancel')),
-          // FilledButton(
-              // style: FilledButton.styleFrom(backgroundColor: Yellor),
-              // onPressed: () => Navigator.pop(ctx, true),
-              // child: const Text('Switch')),
-        // ],
-      // ),
-    // );
-    // if (yes == true) await _startConnectorSetup();
-  // }
+  Future<void> _confirmSwitchToConnector() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Switch to Marble Connector Desktop?'),
+        content: const Text(_connectorBlurb),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Yellor),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Switch')),
+        ],
+      ),
+    );
+    if (yes == true) await _startConnectorSetup();
+  }
 
-  // Future<void> _confirmSwitchToManual() async {
-    // final yes = await showDialog<bool>(
-      // context: context,
-      // builder: (ctx) => AlertDialog(
-        // title: const Text('Switch back to manual?'),
-        // content: const Text(
-            // 'The Use, Charge and Flag buttons will come back and you will '
-            // 'track batteries by hand again.'),
-        // actions: [
-          // TextButton(
-              // onPressed: () => Navigator.pop(ctx, false),
-              // child: const Text('Cancel')),
-          // FilledButton(
-              // style: FilledButton.styleFrom(backgroundColor: Yellor),
-              // onPressed: () => Navigator.pop(ctx, true),
-              // child: const Text('Switch to manual')),
-        // ],
-      // ),
-    // );
-    // if (yes == true) await _setMode(false);
-  // }
+  Future<void> _confirmSwitchToManual() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Switch back to manual?'),
+        content: const Text(
+            'The Use, Charge and Flag buttons will come back and you will '
+            'track batteries by hand again.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Yellor),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Switch to manual')),
+        ],
+      ),
+    );
+    if (yes == true) await _setMode(false);
+  }
 
-  // Widget _modeFooter() {
-    // // Always bottom right. Manual mode: one small button. Connector mode:
-    // // Instructions and Switch to manual, stacked.
-    // final buttons = _autoMode
-        // ? <Widget>[
-            // _connectionStatus(),
-            // const SizedBox(height: 6),
-            // _footerButton(Icons.help_outline, 'Instructions',
-                // () => _openConnectorSetup(instructionsOnly: true)),
-            // const SizedBox(height: 6),
-            // _footerButton(
-                // Icons.swap_horiz, 'Switch to manual', _confirmSwitchToManual),
-          // ]
-        // : <Widget>[
-            // _footerButton(Icons.computer, 'Marble Connector Desktop',
-                // _confirmSwitchToConnector),
-          // ];
-    // return Align(
-      // alignment: Alignment.bottomRight,
-      // child: Padding(
-        // padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-        // child: Column(
-          // mainAxisSize: MainAxisSize.min,
-          // crossAxisAlignment: CrossAxisAlignment.end,
-          // children: buttons,
-        // ),
-      // ),
-    // );
-  // }
+  Widget _modeFooter() {
+    // Always bottom right. Manual mode: one small button. Connector mode:
+    // Instructions and Switch to manual, stacked.
+    final buttons = _autoMode
+        ? <Widget>[
+            _connectionStatus(),
+            const SizedBox(height: 6),
+            _footerButton(Icons.help_outline, 'Instructions',
+                () => _openConnectorSetup(instructionsOnly: true)),
+            const SizedBox(height: 6),
+            _footerButton(
+                Icons.swap_horiz, 'Switch to manual', _confirmSwitchToManual),
+          ]
+        : <Widget>[
+            _footerButton(Icons.computer, 'Marble Connector Desktop',
+                _confirmSwitchToConnector),
+          ];
+    return Align(
+      alignment: Alignment.bottomRight,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: buttons,
+        ),
+      ),
+    );
+  }
 
-  // Widget _connectionStatus() {
-    // final ok = _collectorConnected;
-    // return Row(mainAxisSize: MainAxisSize.min, children: [
-      // Icon(Icons.circle, size: 9, color: ok ? greenChar : grayChar),
-      // const SizedBox(width: 6),
-      // Text(ok ? 'Desktop app connected' : 'Waiting for desktop app',
-          // style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-    // ]);
-  // }
+  Widget _connectionStatus() {
+    final ok = _collectorConnected;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(Icons.circle, size: 9, color: ok ? greenChar : grayChar),
+      const SizedBox(width: 6),
+      Text(ok ? 'Desktop app connected' : 'Waiting for desktop app',
+          style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+    ]);
+  }
 
-  // Widget _footerButton(IconData icon, String label, VoidCallback onTap) {
-    // return TapCursor(
-      // onTap: onTap,
-      // child: Container(
-        // padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        // decoration: BoxDecoration(
-          // color: YellorLight,
-          // borderRadius: BorderRadius.circular(20),
-        // ),
-        // child: Row(mainAxisSize: MainAxisSize.min, children: [
-          // Icon(icon, size: 14, color: YellorDark),
-          // const SizedBox(width: 6),
-          // Text(label,
-              // style: const TextStyle(
-                  // fontSize: 12, fontWeight: FontWeight.w500, color: YellorDark)),
-        // ]),
-      // ),
-    // );
-  // }
+  Widget _footerButton(IconData icon, String label, VoidCallback onTap) {
+    return TapCursor(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: YellorLight,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14, color: YellorDark),
+          const SizedBox(width: 6),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w500, color: YellorDark)),
+        ]),
+      ),
+    );
+  }
 
   void _showSettings() {
     showModalBottomSheet(
@@ -1336,7 +1328,7 @@ class _BatteryScreenState extends State<BatteryScreen>
         child: Column(children: [
           _topBar(),
           Expanded(child: _body()),
-          // if (!_isGuest && teamNum != null) _modeFooter(), // CONNECTOR DISABLED
+          if (!_isGuest && teamNum != null) _modeFooter(),
         ]),
       ),
     );
@@ -1464,11 +1456,9 @@ class _BatteryScreenState extends State<BatteryScreen>
       if (_error != null) _offlineBanner(_error!),
       if (_pending.isNotEmpty) _pendingBanner(),
       // Guests can't use the AI endpoint (needs a passcode), so they keep the simple local pick.
-      // CONNECTOR DISABLED:
-      // if (_waitingForCollector)
-      //   _waitingCard()
-      // else if (_isGuest)
-      if (_isGuest)
+      if (_waitingForCollector)
+        _waitingCard()
+      else if (_isGuest)
         _topPick(recommended!)
       else
         _aiHeader(),
@@ -1490,37 +1480,36 @@ class _BatteryScreenState extends State<BatteryScreen>
     ]);
   }
 
-  // CONNECTOR DISABLED: _waitingCard
-  // Widget _waitingCard() {
-    // return Container(
-      // width: double.infinity,
-      // padding: const EdgeInsets.all(18),
-      // decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
-      // child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Text('WAITING FOR CONNECTION',
-            // style: TextStyle(
-                // fontSize: 11,
-                // fontWeight: FontWeight.w500,
-                // color: Colors.white.withValues(alpha: 0.8),
-                // letterSpacing: 0.5)),
-        // const SizedBox(height: 8),
-        // Row(children: [
-          // const SizedBox(
-              // width: 16,
-              // height: 16,
-              // child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-          // const SizedBox(width: 12),
-          // Expanded(
-            // child: Text(
-                // _isGuest
-                    // ? 'This team tracks batteries with Marble Connector Desktop, and it is not connected right now.'
-                    // : 'Open Marble Connector Desktop on your computer and sign in as team $teamNum. Your batteries show up here as soon as it connects.',
-                // style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.95))),
-          // ),
-        // ]),
-      // ]),
-    // );
-  // }
+  Widget _waitingCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('WAITING FOR CONNECTION',
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withValues(alpha: 0.8),
+                letterSpacing: 0.5)),
+        const SizedBox(height: 8),
+        Row(children: [
+          const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+                _isGuest
+                    ? 'This team tracks batteries with Marble Connector Desktop, and it is not connected right now.'
+                    : 'Open Marble Connector Desktop on your computer and sign in as team $teamNum. Your batteries show up here as soon as it connects.',
+                style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.95))),
+          ),
+        ]),
+      ]),
+    );
+  }
 
   Widget _aiHeader() {
     Battery? picked;
@@ -1582,8 +1571,7 @@ class _BatteryScreenState extends State<BatteryScreen>
             ),
           ]),
         ),
-        // if (picked != null && !_autoMode) // CONNECTOR DISABLED
-        if (picked != null)
+        if (picked != null && !_autoMode)
           Column(children: [
             TapCursor(
               onTap: () => _toggleCharging(picked!),
@@ -1662,8 +1650,7 @@ class _BatteryScreenState extends State<BatteryScreen>
             const SizedBox(height: 2),
             Text(_chargedLabel(battery),
                 style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.9))),
-            // if (_showFlags && battery.flags.isNotEmpty) ...[ // CONNECTOR DISABLED
-            if (battery.flags.isNotEmpty) ...[
+            if (_showFlags && battery.flags.isNotEmpty) ...[
               const SizedBox(height: 6),
               TapCursor(
                 onTap: () => _viewFlags(battery),
@@ -1704,10 +1691,8 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Widget _batteryTile(Battery battery) {
-    // CONNECTOR DISABLED:
-    // final waiting = _waitingForCollector;
-    // final statusColor = waiting ? grayChar : _statusColor(battery);
-    final statusColor = _statusColor(battery);
+    final waiting = _waitingForCollector;
+    final statusColor = waiting ? grayChar : _statusColor(battery);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -1731,30 +1716,22 @@ class _BatteryScreenState extends State<BatteryScreen>
                     maxLines: 1,
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
               ),
-              // if (battery.isInUse && !waiting) // CONNECTOR DISABLED
-              if (battery.isInUse)
+              if (battery.isInUse && !waiting)
                 const Text('IN USE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
             ]),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Text(waiting ? 'WAITING FOR CONNECTION' : _statusLabel(battery), // CONNECTOR DISABLED
-          Text(_statusLabel(battery),
+          Text(waiting ? 'WAITING FOR CONNECTION' : _statusLabel(battery),
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusColor)),
           const SizedBox(height: 2),
-          // CONNECTOR DISABLED:
-          // Text(waiting ? 'Waiting for Marble Connector Desktop' : _chargedLabel(battery),
-          //     style: TextStyle(
-          //         fontSize: 13,
-          //         fontWeight: FontWeight.w500,
-          //         color: waiting ? Colors.grey[500] : null)),
-          Text(_chargedLabel(battery),
-              style: const TextStyle(
+          Text(waiting ? 'Waiting for Marble Connector Desktop' : _chargedLabel(battery),
+              style: TextStyle(
                   fontSize: 13,
-                  fontWeight: FontWeight.w500)),
-          // if (_showFlags && battery.flags.isNotEmpty) ...[ // CONNECTOR DISABLED
-          if (battery.flags.isNotEmpty) ...[
+                  fontWeight: FontWeight.w500,
+                  color: waiting ? Colors.grey[500] : null)),
+          if (_showFlags && battery.flags.isNotEmpty) ...[
             const SizedBox(height: 3),
             TapCursor(
               onTap: () => _viewFlags(battery),
@@ -1763,8 +1740,7 @@ class _BatteryScreenState extends State<BatteryScreen>
             ),
           ],
         ])),
-        // if (!_isGuest && !_autoMode) ...[ // CONNECTOR DISABLED
-        if (!_isGuest) ...[
+        if (!_isGuest && !_autoMode) ...[
           TapCursor(
             onTap: () => _toggleCharging(battery),
             child: Container(
