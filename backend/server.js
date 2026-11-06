@@ -408,6 +408,7 @@ const mongoClient = new MongoClient(MONGODB_URI);
 let teamsCollection;
 let batteriesCollection;
 let batteryTelemetryCollection;
+let batteryReadingsCollection;
 let pushSubscriptionsCollection;
 let notifiedMatchesCollection;
 let eventRostersCollection;
@@ -424,6 +425,7 @@ async function connectToMongo() {
   teamsCollection = db.collection('teams');
   batteriesCollection = db.collection('batteries');
   batteryTelemetryCollection = db.collection('batteryTelemetry');
+  batteryReadingsCollection = db.collection('batteryReadings');
   pushSubscriptionsCollection = db.collection('pushSubscriptions');
   notifiedMatchesCollection = db.collection('notifiedMatches');
   eventRostersCollection = db.collection('eventRosters');
@@ -438,6 +440,9 @@ async function connectToMongo() {
   await batteryTelemetryCollection.createIndex({ teamNumber: 1, createdAt: -1 });
   await batteryTelemetryCollection.createIndex({ teamNumber: 1, label: 1, createdAt: -1 });
   await batteryTelemetryCollection.createIndex({ teamNumber: 1, logId: 1 }, { sparse: true });
+  await batteryReadingsCollection.createIndex({ teamNumber: 1, readingId: 1 }, { unique: true });
+  await batteryReadingsCollection.createIndex({ teamNumber: 1, competitionId: 1, at: -1 });
+  await batteryReadingsCollection.createIndex({ createdAt: 1 }, { expireAfterSeconds: 60 * 24 * 60 * 60 }); // keep 60 days
   await pushSubscriptionsCollection.createIndex({ endpoint: 1 }, { unique: true });
   await pushSubscriptionsCollection.createIndex({ teamNumber: 1, eventKey: 1 });
   await notifiedMatchesCollection.createIndex(
@@ -1585,6 +1590,121 @@ app.post('/battery/telemetry', async (req, res) => {
   }
 });
 
+// ---- Live voltage readings from the Raspberry Pi battery listener ----
+// Separate from match-log telemetry on purpose: these are a time series for
+// graphs, and must never count as a "match" in the battery reports.
+const READING_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // a Pi that was offline can catch up
+const READING_FUTURE_SLACK_MS = 5 * 60 * 1000;
+const GRAPH_MAX_POINTS = 600;
+
+// Keeps the lowest and highest reading of each time bucket, so a short dip
+// still shows on a zoomed-out graph.
+function downsampleReadings(points, maxPoints) {
+  if (points.length <= maxPoints) return points;
+  const buckets = Math.floor(maxPoints / 2);
+  const size = points.length / buckets;
+  const out = [];
+  for (let b = 0; b < buckets; b++) {
+    const slice = points.slice(Math.floor(b * size), Math.floor((b + 1) * size));
+    if (!slice.length) continue;
+    let lo = slice[0];
+    let hi = slice[0];
+    for (const p of slice) {
+      if (p[1] < lo[1]) lo = p;
+      if (p[1] > hi[1]) hi = p;
+    }
+    out.push(...(lo[0] <= hi[0] ? [lo, hi] : [hi, lo]));
+  }
+  return out;
+}
+
+app.post('/battery/reading', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const label = cleanString(req.body.label);
+    const readingId = cleanString(req.body.readingId);
+    const volts = Number(req.body.volts);
+    const at = new Date(req.body.at);
+    if (!label) return res.status(400).json({ error: 'label is required' });
+    if (!readingId || readingId.length > 80) return res.status(400).json({ error: 'readingId is required' });
+    if (req.body.volts === null || req.body.volts === '' || !Number.isFinite(volts) || volts < 0 || volts > 40) {
+      return res.status(400).json({ error: 'volts must be a number from 0 to 40' });
+    }
+    const now = Date.now();
+    if (Number.isNaN(at.getTime()) || at.getTime() > now + READING_FUTURE_SLACK_MS || at.getTime() < now - READING_MAX_AGE_MS) {
+      return res.status(400).json({ error: 'at must be a recent time' });
+    }
+
+    const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
+    if (!battery) return res.status(404).json({ error: 'Battery not found' });
+
+    const rounded = Math.round(volts * 1000) / 1000;
+    try {
+      await batteryReadingsCollection.insertOne({
+        teamNumber: team.teamNumber,
+        competitionId: team.batteryCompetitionId || 'legacy',
+        label,
+        volts: rounded,
+        at,
+        nodeId: (cleanString(req.body.nodeId) || '').slice(0, 20),
+        readingId,
+        createdAt: new Date(),
+      });
+    } catch (err) {
+      if (err && err.code === 11000) return res.status(409).json({ error: 'Reading already saved', duplicate: true });
+      throw err;
+    }
+
+    // "Added to the battery": the newest reading also lives on the battery itself.
+    // Only moves forward, so a Pi catching up on old readings can't overwrite it.
+    const atIso = at.toISOString();
+    await batteriesCollection.updateOne(
+      {
+        teamNumber: team.teamNumber,
+        label,
+        $or: [{ lastVoltageAt: { $exists: false } }, { lastVoltageAt: { $lt: atIso } }],
+      },
+      { $set: { lastVoltage: rounded, lastVoltageAt: atIso } },
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Battery reading save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/battery/readings', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 24 * 14);
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const rows = await batteryReadingsCollection
+      .find({
+        teamNumber: team.teamNumber,
+        competitionId: team.batteryCompetitionId || 'legacy',
+        at: { $gte: since },
+      })
+      .project({ _id: 0, label: 1, volts: 1, at: 1 })
+      .sort({ at: -1 })
+      .limit(50000)
+      .toArray();
+    rows.reverse(); // oldest first
+
+    const byLabel = {};
+    for (const r of rows) (byLabel[r.label] ||= []).push([r.at.getTime(), r.volts]);
+    const series = {};
+    for (const [label, points] of Object.entries(byLabel)) series[label] = downsampleReadings(points, GRAPH_MAX_POINTS);
+    res.json({ hours, series });
+  } catch (err) {
+    console.error('Battery readings list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/battery/telemetry/assign', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
@@ -1702,6 +1822,11 @@ app.delete('/battery/:label', async (req, res) => {
       // Otherwise its robot-log history would show up under the next battery
       // that gets this label.
       await batteryTelemetryCollection.deleteMany({
+        teamNumber: team.teamNumber,
+        competitionId: team.batteryCompetitionId || 'legacy',
+        label: req.params.label,
+      });
+      await batteryReadingsCollection.deleteMany({
         teamNumber: team.teamNumber,
         competitionId: team.batteryCompetitionId || 'legacy',
         label: req.params.label,
