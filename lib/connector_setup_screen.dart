@@ -112,66 +112,43 @@ class _ConnectorSetupScreenState extends State<ConnectorSetupScreen> {
   List<_Slide> _slides() {
     final team = _team == null ? 'your team number' : 'team $_team';
     return [
-      const _Slide(
-        icon: Icons.computer,
-        title: 'Marble Connector Desktop',
-        body: 'A small app on your computer. It reads your robot\'s match logs '
-            'and keeps track of your batteries for you. Marble then just shows '
-            'your batteries and which one to use, with no buttons to tap.',
-        steps: [
-          'It runs on a Windows laptop, not on your phone.',
-          'Set it up once. After that it runs by itself.',
-        ],
-      ),
       _Slide(
-        icon: Icons.download,
-        title: 'Install it on a laptop',
+        icon: Icons.computer,
+        title: 'Install the desktop app',
+        body: 'Marble Connector Desktop reads your robot\'s match logs and keeps '
+            'track of your batteries, so there is nothing to tap by hand.',
         steps: [
-          'Pick a Windows laptop that comes to every event, like the programming laptop or the pit laptop.',
           kConnectorDownloadUrl.isEmpty
-              ? 'Get the Marble Collector installer from your team\'s programming lead and run it.'
-              : 'Download and run the installer: $kConnectorDownloadUrl',
-          'In the app\'s Settings, leave "Start with Windows" on. It then waits quietly in the system tray, already running when you plug the USB in.',
+              ? 'Get the Marble Collector installer from your team\'s programming lead and run it on a Windows laptop that comes to every event.'
+              : 'On a Windows laptop that comes to every event, download and run the installer: $kConnectorDownloadUrl',
+          'Leave \"Start with Windows\" on in its Settings. It then waits quietly in the system tray.',
         ],
       ),
       _Slide(
         icon: Icons.login,
         title: 'Sign in with your team',
         steps: [
-          'Open Marble Collector on the laptop.',
-          'Enter $team and the same passcode you use for the Battery tracker in this app.',
+          'Open Marble Collector and enter $team and the same passcode you use for the Battery tracker here.',
           'Click Connect. When it works, the dot at the bottom of this screen turns green.',
           'If it says the team is not set to Marble Connector Desktop, the switch in this app did not go through. Close this screen and switch again.',
         ],
       ),
       const _Slide(
         icon: Icons.usb,
-        title: 'Plug in the robot\'s log USB',
+        title: 'Plug in the log USB after a match',
         steps: [
-          'After a match, take the USB stick out of the roboRIO and plug it into the laptop.',
-          'The app looks in the logs folder on any USB stick by itself and opens when it finds a new log.',
-          'Logs saved somewhere else, like Driver Station logs? In the app\'s Settings, use "Add folder" under "Extra folders to watch".',
-          'It reads each log for the lowest voltage, brownouts, amp-hours used and battery resistance.',
-        ],
-      ),
-      const _Slide(
-        icon: Icons.battery_charging_full,
-        title: 'Tell it which battery was in',
-        steps: [
-          'For each new log, the app asks "Which battery was in the robot?"',
-          'Tap that battery. The one marked "In use" is suggested for you.',
-          'Not sure? Tap "I don\'t know yet". The log is still saved, and you can assign its battery later in Marble.',
-          'Skip a log only if it is not a real match, like a test run.',
+          'Take the USB stick out of the roboRIO and plug it into the laptop. The app finds new logs by itself.',
+          'It asks which battery was in the robot. Tap that battery. Not sure? Tap \"Not sure\" and assign it later.',
+          'Logs saved somewhere else? In the app\'s Settings, use \"Add folder\".',
         ],
       ),
       const _Slide(
         icon: Icons.check_circle_outline,
         title: 'Back here in Marble',
         steps: [
-          'Until the desktop app connects, Marble shows "Waiting for connection".',
-          'Once it is connected, each battery shows its status, and Marble recommends which one to grab next.',
-          'The Use, Charge and Flag buttons are hidden in this mode, because the logs do the tracking.',
-          'To go back to tapping by hand, use "Switch to manual" at the bottom right of the Battery tracker.',
+          'A battery turns green when its sensor node is sending readings, and dark grey when it is not. This works even with the laptop off.',
+          'Tap any battery for its voltage graph and how Marble reads it. That is also where you rename it.',
+          'To track by hand again, open the ... menu at the top right and choose \"Switch to manual tracking\".',
         ],
       ),
     ];

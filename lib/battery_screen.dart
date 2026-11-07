@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'batteryLOGIN_screen.dart';
+import 'battery_detail_screen.dart';
 import 'connector_setup_screen.dart';
 
 const Yellor = Color(0xFFFFC107);
@@ -21,6 +22,12 @@ const int kCooldownMinutes = 30;
 const int kPollSeconds = 3;
 const grayChar = Color(0xFFAAAAAA);
 const deadChar = Color(0xFF616161);
+
+// Battery icons: green while the battery's sensor node is sending readings,
+// dark grey when it is not.
+const nodeOnColor = Color(0xFF2E9E55);
+const nodeOffColor = Color(0xFF4A4A4A);
+const int kNodeOnlineMinutes = 5; // raise this if the Raspberry Pi sends less often
 
 class _LabelKey implements Comparable<_LabelKey> {
   final int? number;
@@ -105,6 +112,8 @@ class Battery {
   final List<FlagEntry> flags;
   bool isCharging;
   bool isInUse;
+  double? lastVoltage; // newest reading from the battery's sensor node
+  DateTime? lastVoltageAt;
 
   Battery({
     required this.label,
@@ -114,6 +123,8 @@ class Battery {
     required this.flags,
     required this.isCharging,
     required this.isInUse,
+    this.lastVoltage,
+    this.lastVoltageAt,
   });
 
   factory Battery.fromJson(Map<String, dynamic> json) {
@@ -127,7 +138,20 @@ class Battery {
       flags: flagsJson.map((f) => FlagEntry.fromJson(f as Map<String, dynamic>)).toList(),
       isCharging: json['isCharging'] as bool? ?? false,
       isInUse: json['isInUse'] as bool? ?? false,
+      lastVoltage: (json['lastVoltage'] as num?)?.toDouble(),
+      lastVoltageAt: DateTime.tryParse(json['lastVoltageAt'] as String? ?? ''),
     );
+  }
+
+  /// How long ago the node last reported, or null if it never has.
+  Duration? get nodeAge => (lastVoltage == null || lastVoltageAt == null)
+      ? null
+      : DateTime.now().difference(lastVoltageAt!);
+
+  /// True while the node has sent a reading recently.
+  bool get nodeConnected {
+    final age = nodeAge;
+    return age != null && age < const Duration(minutes: kNodeOnlineMinutes);
   }
 
   String get displayName =>
@@ -168,6 +192,122 @@ class Battery {
 
   DateTime? get fullyChargedAt =>
       chargedAt?.add(Duration(minutes: kChargeMinutes));
+}
+
+String timeAgoText(Duration d) {
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+  if (d.inHours < 24) return '${d.inHours}h ${d.inMinutes % 60}m ago';
+  return '${d.inDays}d ago';
+}
+
+String fmtCeilMinutes(Duration d) {
+  final m = (d.inSeconds / 60).ceil();
+  return '${m < 1 ? 1 : m}m';
+}
+
+String batteryStatusLabel(Battery b) {
+  if (b.isInUse) return 'IN USE';
+  if (b.isDead) {
+    final cd = b.cooldownRemaining;
+    if (cd != null) return 'DEAD · COOLING DOWN ${fmtCeilMinutes(cd)}';
+    return 'DEAD · READY TO CHARGE';
+  }
+  if (b.isCharging) {
+    final rem = b.chargeTimeRemaining;
+    if (rem == null || rem == Duration.zero) return 'READY';
+    final h = rem.inHours;
+    final m = rem.inMinutes % 60;
+    if (h > 0) return 'CHARGING ${h}h ${m}m left';
+    return 'CHARGING ${m}m left';
+  }
+  return 'AVAILABLE';
+}
+
+Color batteryStatusColor(Battery b) {
+  if (b.isInUse) return redChar;
+  if (b.isDead) return b.isCoolingDown ? Colors.blueGrey : deadChar;
+  if (b.isCharging) {
+    return b.isChargingComplete ? greenChar : Colors.orange;
+  }
+  return grayChar;
+}
+
+String batteryChargedLabel(Battery b) {
+  if (b.isInUse) {
+    return 'Started ${timeAgoText(DateTime.now().difference(b.lastUsedAt))}';
+  }
+  if (b.isDead) {
+    return 'Used ${timeAgoText(DateTime.now().difference(b.lastUsedAt))}, needs a charge';
+  }
+  if (b.chargedAt == null && !b.hasBeenUsed) return 'Just added';
+  if (b.isCharging) {
+    final done = b.fullyChargedAt;
+    if (done != null && !done.isAfter(DateTime.now())) {
+      return 'Fully charged ${timeAgoText(DateTime.now().difference(done))}';
+    }
+    return 'Charging started ${timeAgoText(DateTime.now().difference(b.chargedAt!))}';
+  }
+  return 'Charged ${timeAgoText(b.timeSinceCharged)}';
+}
+
+/// Short line under a battery's name: its voltage while the node is sending.
+String batteryNodeLine(Battery b) =>
+    b.nodeConnected ? '${b.lastVoltage!.toStringAsFixed(2)} V' : 'Not connected';
+
+/// The battery icon: completely filled and green while the node is connected,
+/// dark grey with an empty dash when it is not. The voltage is written next to
+/// it, so the icon itself does not need to show a level.
+class BatteryIcon extends StatelessWidget {
+  final Battery battery;
+  final double height;
+
+  const BatteryIcon({super.key, required this.battery, this.height = 58});
+
+  @override
+  Widget build(BuildContext context) {
+    final on = battery.nodeConnected;
+    return CustomPaint(
+      size: Size(height * 48 / 66, height),
+      painter: _BatteryIconPainter(
+          color: on ? nodeOnColor : nodeOffColor, full: on),
+    );
+  }
+}
+
+class _BatteryIconPainter extends CustomPainter {
+  final Color color;
+  final bool full; // true = connected, fill the whole battery
+
+  _BatteryIconPainter({required this.color, required this.full});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Drawn on a 48 x 66 grid, scaled to fit.
+    final sx = size.width / 48, sy = size.height / 66;
+    RRect box(double x, double y, double w, double h, double r) =>
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(x * sx, y * sy, w * sx, h * sy), Radius.circular(r * sx));
+
+    final solid = Paint()..color = color;
+    canvas.drawRRect(box(17, 2, 14, 6, 2), solid);
+    canvas.drawRRect(
+        box(5, 8, 38, 56, 7),
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3 * sx);
+    if (full) {
+      canvas.drawRRect(box(10, 12, 28, 48, 3), solid);
+    } else {
+      canvas.drawRRect(
+          box(16, 34, 16, 4, 2), Paint()..color = color.withValues(alpha: 0.55));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BatteryIconPainter old) =>
+      old.color != color || old.full != full;
 }
 
 class BatteryScreen extends StatefulWidget {
@@ -850,39 +990,6 @@ class _BatteryScreenState extends State<BatteryScreen>
     ));
   }
 
-  void _viewFlags(Battery battery) {
-    if (battery.flags.isEmpty) return;
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${battery.displayName} flags',
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 14),
-            ...battery.flags.reversed.map((flag) => Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(flag.note.isEmpty ? 'No reason provided' : flag.note),
-                      const SizedBox(height: 3),
-                      Text(_timeAgo(DateTime.now().difference(flag.flaggedAt)),
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                    ],
-                  ),
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showPasscode() {
     showDialog(
       context: context,
@@ -1144,90 +1251,59 @@ class _BatteryScreenState extends State<BatteryScreen>
     if (yes == true) await _setMode(false);
   }
 
-  Widget _modeFooter() {
-    // Always bottom right. Manual mode: one small button. Connector mode:
-    // Instructions and Switch to manual, stacked.
-    final buttons = _autoMode
-        ? <Widget>[
-            _connectionStatus(),
-            const SizedBox(height: 6),
-            _footerButton(Icons.help_outline, 'Instructions',
-                () => _openConnectorSetup(instructionsOnly: true)),
-            const SizedBox(height: 6),
-            _footerButton(
-                Icons.swap_horiz, 'Switch to manual', _confirmSwitchToManual),
-          ]
-        : <Widget>[
-            _footerButton(Icons.computer, 'Marble Connector Desktop',
-                _confirmSwitchToConnector),
-          ];
-    return Align(
-      alignment: Alignment.bottomRight,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: buttons,
-        ),
-      ),
-    );
-  }
-
-  Widget _connectionStatus() {
-    final ok = _collectorConnected;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.circle, size: 9, color: ok ? greenChar : grayChar),
-      const SizedBox(width: 6),
-      Text(ok ? 'Desktop app connected' : 'Waiting for desktop app',
-          style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-    ]);
-  }
-
-  Widget _footerButton(IconData icon, String label, VoidCallback onTap) {
-    return TapCursor(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: YellorLight,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 14, color: YellorDark),
-          const SizedBox(width: 6),
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w500, color: YellorDark)),
-        ]),
-      ),
-    );
-  }
-
   void _showSettings() {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Team $teamNum', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 4),
-            Text(_isGuest ? 'Viewing as guest' : 'Logged in',
-                style: TextStyle(fontSize: 13, color: Colors.grey[500])),
-            const SizedBox(height: 20),
-            if (!_isGuest) ...[
-              _settingsTile(Icons.visibility_outlined, 'Show passcode', _showPasscode),
-              _settingsTile(Icons.lock_outline, 'Change passcode', _showChangePasscode),
-              _settingsTile(Icons.refresh, 'New comp / start fresh', _showStartFresh, color: redChar),
-              const SizedBox(height: 8),
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Team $teamNum', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+              const SizedBox(height: 4),
+              Text(_isGuest ? 'Viewing as guest' : 'Logged in',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+              const SizedBox(height: 20),
+              if (!_isGuest) ...[
+                // How batteries get tracked: by hand, or by the desktop app.
+                if (_autoMode) ...[
+                  Row(children: [
+                    Icon(Icons.circle,
+                        size: 9, color: _collectorConnected ? nodeOnColor : nodeOffColor),
+                    const SizedBox(width: 8),
+                    Text(
+                        _collectorConnected
+                            ? 'Marble Connector Desktop is connected'
+                            : 'Waiting for Marble Connector Desktop',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+                  ]),
+                  _settingsTile(Icons.help_outline, 'Connector instructions', () {
+                    Navigator.pop(ctx);
+                    _openConnectorSetup(instructionsOnly: true);
+                  }),
+                  _settingsTile(Icons.swap_horiz, 'Switch to manual tracking', () {
+                    Navigator.pop(ctx);
+                    _confirmSwitchToManual();
+                  }),
+                ] else
+                  _settingsTile(Icons.computer, 'Track with Marble Connector Desktop', () {
+                    Navigator.pop(ctx);
+                    _confirmSwitchToConnector();
+                  }),
+                const Divider(height: 24),
+                _settingsTile(Icons.visibility_outlined, 'Show passcode', _showPasscode),
+                _settingsTile(Icons.lock_outline, 'Change passcode', _showChangePasscode),
+                _settingsTile(Icons.refresh, 'New comp / start fresh', _showStartFresh, color: redChar),
+                const SizedBox(height: 8),
+              ],
+              _settingsTile(Icons.logout, 'Leave team', () { Navigator.pop(ctx); _logout(); }),
             ],
-            _settingsTile(Icons.logout, 'Leave team', () { Navigator.pop(ctx); _logout(); }),
-          ],
+          ),
         ),
       ),
     );
@@ -1248,62 +1324,8 @@ class _BatteryScreenState extends State<BatteryScreen>
     );
   }
 
-  String _fmtCeilMinutes(Duration d) {
-    final m = (d.inSeconds / 60).ceil();
-    return '${m < 1 ? 1 : m}m';
-  }
-
-  String _statusLabel(Battery b) {
-    if (b.isInUse) return 'IN USE';
-    if (b.isDead) {
-      final cd = b.cooldownRemaining;
-      if (cd != null) return 'DEAD · COOLING DOWN ${_fmtCeilMinutes(cd)}';
-      return 'DEAD · READY TO CHARGE';
-    }
-    if (b.isCharging) {
-      final rem = b.chargeTimeRemaining;
-      if (rem == null || rem == Duration.zero) return 'READY';
-      final h = rem.inHours;
-      final m = rem.inMinutes % 60;
-      if (h > 0) return 'CHARGING ${h}h ${m}m left';
-      return 'CHARGING ${m}m left';
-    }
-    return 'AVAILABLE';
-  }
-
-  Color _statusColor(Battery b) {
-    if (b.isInUse) return redChar;
-    if (b.isDead) return b.isCoolingDown ? Colors.blueGrey : deadChar;
-    if (b.isCharging) {
-      return b.isChargingComplete ? greenChar : Colors.orange;
-    }
-    return grayChar;
-  }
-
-  String _timeAgo(Duration d) {
-    if (d.inMinutes < 1) return 'just now';
-    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-    if (d.inHours < 24) return '${d.inHours}h ${d.inMinutes % 60}m ago';
-    return '${d.inDays}d ago';
-  }
-
-  String _chargedLabel(Battery b) {
-    if (b.isInUse) {
-      return 'Started ${_timeAgo(DateTime.now().difference(b.lastUsedAt))}';
-    }
-    if (b.isDead) {
-      return 'Used ${_timeAgo(DateTime.now().difference(b.lastUsedAt))}, needs a charge';
-    }
-    if (b.chargedAt == null && !b.hasBeenUsed) return 'Just added';
-    if (b.isCharging) {
-      final done = b.fullyChargedAt;
-      if (done != null && !done.isAfter(DateTime.now())) {
-        return 'Fully charged ${_timeAgo(DateTime.now().difference(done))}';
-      }
-      return 'Charging started ${_timeAgo(DateTime.now().difference(b.chargedAt!))}';
-    }
-    return 'Charged ${_timeAgo(b.timeSinceCharged)}';
-  }
+  String _fmtCeilMinutes(Duration d) => fmtCeilMinutes(d);
+  String _chargedLabel(Battery b) => batteryChargedLabel(b);
 
   Battery _localRecommended() {
     for (final b in _batteries) {
@@ -1328,7 +1350,6 @@ class _BatteryScreenState extends State<BatteryScreen>
         child: Column(children: [
           _topBar(),
           Expanded(child: _body()),
-          if (!_isGuest && teamNum != null) _modeFooter(),
         ]),
       ),
     );
@@ -1355,7 +1376,15 @@ class _BatteryScreenState extends State<BatteryScreen>
               Text(title, overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
               if (_isGuest)
-                Text('Guest view (read only)', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                Text('Guest view (read only)', style: TextStyle(fontSize: 11, color: Colors.grey[500]))
+              else if (_autoMode)
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.circle,
+                      size: 7, color: _collectorConnected ? nodeOnColor : nodeOffColor),
+                  const SizedBox(width: 5),
+                  Text(_collectorConnected ? 'Connector connected' : 'Waiting for connector',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ]),
             ]),
           ),
           TapCursor(
@@ -1450,339 +1479,250 @@ class _BatteryScreenState extends State<BatteryScreen>
     ]);
   }
 
+  // The recommended battery: Marble's AI pick, or a simple local pick for guests.
+  String? get _suggestedLabel {
+    if (_waitingForCollector || _batteries.isEmpty) return null;
+    if (_isGuest) return _localRecommended().label;
+    return _recommendedLabel;
+  }
+
+  void _openDetail(Battery b) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BatteryDetailScreen(
+          label: b.label,
+          team: teamNum ?? '',
+          passcode: _passcode,
+          isGuest: _isGuest,
+          autoMode: _autoMode,
+          showFlags: _showFlags,
+          lookup: () {
+            for (final x in _batteries) {
+              if (x.label == b.label) return x;
+            }
+            return null;
+          },
+          onRename: _renameBattery,
+          onToggleInUse: _toggleInUse,
+          onToggleCharging: _toggleCharging,
+          onFlag: _flagWeak,
+        ),
+      ),
+    );
+  }
+
   Widget _list() {
-    final recommended = _isGuest ? _localRecommended() : null;
     return ListView(padding: const EdgeInsets.all(16), children: [
       if (_error != null) _offlineBanner(_error!),
       if (_pending.isNotEmpty) _pendingBanner(),
-      // Guests can't use the AI endpoint (needs a passcode), so they keep the simple local pick.
-      if (_waitingForCollector)
-        _waitingCard()
-      else if (_isGuest)
-        _topPick(recommended!)
-      else
-        _aiHeader(),
+      _suggestionBar(),
       const SizedBox(height: 16),
-      Row(children: [
-        Expanded(
-          child: Text('All batteries',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.grey[600])),
-        ),
-        if (!_isGuest)
-          Text('tap a name to rename',
-              style: TextStyle(fontSize: 11, color: Colors.grey[400])),
-      ]),
-      const SizedBox(height: 8),
-      ..._batteries.map(_batteryTile),
-      const SizedBox(height: 12),
+      _grid(),
+      const SizedBox(height: 18),
+      _legend(),
+      const SizedBox(height: 14),
       if (!_isGuest) _addButton(),
       const SizedBox(height: 16),
     ]);
   }
 
-  Widget _waitingCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('WAITING FOR CONNECTION',
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.8),
-                letterSpacing: 0.5)),
-        const SizedBox(height: 8),
-        Row(children: [
-          const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-                _isGuest
-                    ? 'This team tracks batteries with Marble Connector Desktop, and it is not connected right now.'
-                    : 'Open Marble Connector Desktop on your computer and sign in as team $teamNum. Your batteries show up here as soon as it connects.',
-                style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.95))),
-          ),
-        ]),
-      ]),
-    );
-  }
+  // One slim strip above the batteries: what to grab next, or why there is
+  // nothing to show yet.
+  Widget _suggestionBar() {
+    Widget strip(List<Widget> children, {Color color = YellorLight}) => Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration:
+              BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
+          child: Row(children: children),
+        );
 
-  Widget _aiHeader() {
+    if (_waitingForCollector) {
+      return strip([
+        const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2, color: YellorDark)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+              _isGuest
+                  ? 'Waiting for Marble Connector Desktop to connect.'
+                  : 'Waiting for Marble Connector Desktop. Open it on your computer and sign in as team $teamNum.',
+              style: const TextStyle(fontSize: 12.5, color: YellorDark)),
+        ),
+      ]);
+    }
+
+    if (_loadingRecommendation) {
+      return strip([
+        const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2, color: YellorDark)),
+        const SizedBox(width: 10),
+        const Text('Picking a battery…',
+            style: TextStyle(fontSize: 13, color: YellorDark)),
+      ]);
+    }
+
+    final label = _suggestedLabel;
     Battery? picked;
-    if (_recommendedLabel != null) {
+    if (label != null) {
       for (final b in _batteries) {
-        if (b.label == _recommendedLabel) {
-          picked = b;
-          break;
-        }
+        if (b.label == label) picked = b;
       }
     }
-    final charging = picked != null && picked.isCharging && !picked.isDead;
 
-    Widget content;
-    if (_loadingRecommendation) {
-      content = Row(children: [
-        const SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-        const SizedBox(width: 12),
-        Text('Asking AI...',
-            style: TextStyle(fontSize: 15, color: Colors.white.withValues(alpha: 0.9))),
-      ]);
-    } else if (_recommendedLabel != null) {
-      content = Row(children: [
+    if (picked != null) {
+      final reason = _isGuest ? _chargedLabel(picked) : _recommendReason;
+      return strip([
+        const Icon(Icons.auto_awesome, color: YellorDark, size: 18),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('AI RECOMMENDS',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.white.withValues(alpha: 0.8),
-                    letterSpacing: 0.5)),
-            const SizedBox(height: 4),
-            Text(picked?.displayName ?? _recommendedLabel!,
+            Text('Next up: ${picked.displayName}',
                 style: const TextStyle(
-                    fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
-            if (picked != null) ...[
-              const SizedBox(height: 3),
-              Text(_statusLabel(picked),
-                  style: TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w700, color: _statusColor(picked))),
-            ],
-            if (_recommendReason != null) ...[
-              const SizedBox(height: 4),
-              Text(_recommendReason!,
-                  style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.9))),
-            ],
-            const SizedBox(height: 8),
-            TapCursor(
-              onTap: _askAiRecommendation,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.refresh, size: 14, color: Colors.white.withValues(alpha: 0.85)),
-                const SizedBox(width: 4),
-                Text('Ask again',
-                    style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.85))),
-              ]),
-            ),
+                    fontSize: 15, fontWeight: FontWeight.w700, color: YellorDark)),
+            if (reason != null && reason.isNotEmpty)
+              Text(reason,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700])),
           ]),
         ),
-        if (picked != null && !_autoMode)
-          Column(children: [
-            TapCursor(
-              onTap: () => _toggleCharging(picked!),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                    color: charging ? greenChar : Colors.white,
-                    borderRadius: BorderRadius.circular(12)),
-                child: Text(charging ? 'Charging' : 'Mark charging',
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: charging ? Colors.white : YellorDark)),
-              ),
+        if (!_isGuest)
+          TapCursor(
+            onTap: _askAiRecommendation,
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.refresh, color: YellorDark, size: 18),
             ),
-            const SizedBox(height: 8),
-            TapCursor(
-              onTap: () => _flagWeak(picked!),
-              child: Text('Flag weak',
-                  style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.85))),
-            ),
-          ]),
-      ]);
-    } else {
-      content = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('WHICH BATTERY?',
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.8),
-                letterSpacing: 0.5)),
-        const SizedBox(height: 10),
-        TapCursor(
-          onTap: _askAiRecommendation,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration:
-                BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
-            child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.auto_awesome, color: YellorDark, size: 18),
-              SizedBox(width: 8),
-              Text('Ask AI which battery to use',
-                  style: TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600, color: YellorDark)),
-            ]),
           ),
-        ),
       ]);
     }
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
-      child: content,
-    );
-  }
-
-  Widget _topPick(Battery battery) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
-      child: Row(
-        children: [
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('RECOMMENDED BATTERY',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
-                    color: Colors.white.withValues(alpha: 0.8), letterSpacing: 0.5)),
-            const SizedBox(height: 4),
-            Text(battery.displayName,
-                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
-            const SizedBox(height: 3),
-            Text(_statusLabel(battery),
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _statusColor(battery))),
-            const SizedBox(height: 2),
-            Text(_chargedLabel(battery),
-                style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.9))),
-            if (_showFlags && battery.flags.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              TapCursor(
-                onTap: () => _viewFlags(battery),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(20)),
-                  child: Text('Flagged ${battery.flags.length}x',
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.white)),
-                ),
-              ),
-            ],
-          ])),
-          if (!_isGuest)
-            Column(children: [
-              TapCursor(
-                onTap: () => _toggleCharging(battery),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                      color: (battery.isCharging && !battery.isDead) ? greenChar : Colors.white,
-                      borderRadius: BorderRadius.circular(12)),
-                  child: Text((battery.isCharging && !battery.isDead) ? 'Charging' : 'Mark charging',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
-                          color: (battery.isCharging && !battery.isDead) ? Colors.white : YellorDark)),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TapCursor(
-                onTap: () => _flagWeak(battery),
-                child: Text('Flag weak',
-                    style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.85))),
-              ),
-            ]),
-        ],
-      ),
-    );
-  }
-
-  Widget _batteryTile(Battery battery) {
-    final waiting = _waitingForCollector;
-    final statusColor = waiting ? grayChar : _statusColor(battery);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.07), width: 0.5),
-      ),
-      child: Row(children: [
-        TapCursor(
-          onTap: () => _renameBattery(battery),
-          child: Container(
-            width: 58, height: 46,
-            decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(battery.displayName,
-                    maxLines: 1,
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
-              ),
-              if (battery.isInUse && !waiting)
-                const Text('IN USE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
-            ]),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(waiting ? 'WAITING FOR CONNECTION' : _statusLabel(battery),
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusColor)),
-          const SizedBox(height: 2),
-          Text(waiting ? 'Waiting for Marble Connector Desktop' : _chargedLabel(battery),
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: waiting ? Colors.grey[500] : null)),
-          if (_showFlags && battery.flags.isNotEmpty) ...[
-            const SizedBox(height: 3),
-            TapCursor(
-              onTap: () => _viewFlags(battery),
-              child: Text('flagged ${battery.flags.length}x, tap to view',
-                  style: const TextStyle(fontSize: 11, color: redChar)),
-            ),
-          ],
-        ])),
-        if (!_isGuest && !_autoMode) ...[
-          TapCursor(
-            onTap: () => _toggleCharging(battery),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                  color: (battery.isCharging && !battery.isDead)
-                      ? greenChar
-                      : battery.isCoolingDown
-                          ? Colors.blueGrey.withValues(alpha: 0.15)
-                          : YellorLight,
-                  borderRadius: BorderRadius.circular(10)),
-              child: Text((battery.isCharging && !battery.isDead) ? 'Charging' : 'Charge',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
-                      color: (battery.isCharging && !battery.isDead)
-                          ? Colors.white
-                          : battery.isCoolingDown
-                              ? Colors.blueGrey
-                              : YellorDark)),
-            ),
-          ),
-          const SizedBox(width: 6),
-          TapCursor(
-            onTap: () => _toggleInUse(battery),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                  color: battery.isInUse ? redChar : YellorLight,
-                  borderRadius: BorderRadius.circular(10)),
-              child: Text(battery.isInUse ? 'In use' : 'Use',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
-                      color: battery.isInUse ? Colors.white : YellorDark)),
-            ),
-          ),
-          const SizedBox(width: 6),
-          TapCursor(
-            onTap: () => _flagWeak(battery),
-            child: Padding(padding: const EdgeInsets.all(8),
-                child: Icon(Icons.flag_outlined, size: 16, color: Colors.grey[500])),
-          ),
-        ],
+    if (_isGuest) return const SizedBox.shrink();
+    return TapCursor(
+      onTap: _askAiRecommendation,
+      child: strip([
+        const Icon(Icons.auto_awesome, color: YellorDark, size: 18),
+        const SizedBox(width: 10),
+        const Text('Ask AI which battery to use',
+            style: TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600, color: YellorDark)),
       ]),
     );
+  }
+
+  // Connected batteries first (top left), then the rest, each group in label order.
+  List<Battery> _gridOrder() {
+    final list = [..._batteries];
+    list.sort((a, b) {
+      if (a.nodeConnected != b.nodeConnected) return a.nodeConnected ? -1 : 1;
+      return _labelSortKey(a.label).compareTo(_labelSortKey(b.label));
+    });
+    return list;
+  }
+
+  Widget _grid() {
+    return LayoutBuilder(builder: (context, c) {
+      const gap = 10.0;
+      final cols = c.maxWidth >= 720 ? 4 : (c.maxWidth >= 480 ? 3 : 2);
+      final w = (c.maxWidth - gap * (cols - 1)) / cols;
+      return Wrap(
+        spacing: gap,
+        runSpacing: gap,
+        children: [for (final b in _gridOrder()) _tile(b, w)],
+      );
+    });
+  }
+
+  Widget _pill(String text, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Text(text,
+          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: fg)),
+    );
+  }
+
+  // One small tag per battery, most important first.
+  Widget? _tileTag(Battery b, bool suggested) {
+    if (_waitingForCollector) return null;
+    if (b.isInUse) return _pill('IN USE', redChar, Colors.white);
+    if (!_autoMode) {
+      if (b.isDead) {
+        return b.isCoolingDown
+            ? _pill('COOLING', Colors.blueGrey.withValues(alpha: 0.15), Colors.blueGrey)
+            : _pill('DEAD', deadChar.withValues(alpha: 0.15), deadChar);
+      }
+      if (b.isCharging) {
+        return b.isChargingComplete
+            ? _pill('READY', greenChar.withValues(alpha: 0.15), greenChar)
+            : _pill('CHARGING', Colors.orange.withValues(alpha: 0.18), Colors.deepOrange);
+      }
+    }
+    if (suggested) return _pill('NEXT', Yellor, Colors.black87);
+    return null;
+  }
+
+  Widget _tile(Battery b, double width) {
+    final suggested = _suggestedLabel == b.label;
+    final tag = _tileTag(b, suggested);
+    final connected = b.nodeConnected;
+    return SizedBox(
+      width: width,
+      child: TapCursor(
+        onTap: () => _openDetail(b),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: suggested ? Yellor : Colors.black.withValues(alpha: 0.07),
+              width: suggested ? 2 : 0.5,
+            ),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(
+              height: 24,
+              child: Row(children: [
+                if (tag != null) tag,
+                const Spacer(),
+              ]),
+            ),
+            const SizedBox(height: 4),
+            BatteryIcon(battery: b, height: 58),
+            const SizedBox(height: 10),
+            Text(b.displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 2),
+            Text(batteryNodeLine(b),
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: connected ? FontWeight.w700 : FontWeight.w400,
+                    color: connected ? nodeOnColor : Colors.grey[500])),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _legend() {
+    Widget item(Color c, String text) => Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.circle, size: 9, color: c),
+          const SizedBox(width: 6),
+          Text(text, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        ]);
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      item(nodeOnColor, 'Node connected'),
+      const SizedBox(width: 18),
+      item(nodeOffColor, 'Not connected'),
+    ]);
   }
 
   Widget _addButton() {
