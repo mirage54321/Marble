@@ -981,6 +981,54 @@ class _BatteryScreenState extends State<BatteryScreen>
     ));
   }
 
+  // Deletes a battery, or (dataOnly) keeps it and clears its logs and readings.
+  // Needs a connection, so it is never queued for later like Use / Charge.
+  Future<bool> _deleteBattery(Battery battery, {required bool dataOnly}) async {
+    if (_isGuest) return false;
+    final label = Uri.encodeComponent(battery.label);
+    final team = Uri.encodeQueryComponent(teamNum ?? '');
+    final url = '$_base/battery/$label${dataOnly ? '/data' : ''}?teamNumber=$team';
+    try {
+      final res = await http
+          .delete(Uri.parse(url),
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Team-Passcode': _passcode ?? '',
+              },
+              body: jsonEncode({'teamNumber': teamNum, 'passcode': _passcode}))
+          .timeout(const Duration(seconds: 15));
+      // 404 = it is already gone, which is what was wanted.
+      if (res.statusCode != 200 && res.statusCode != 404) {
+        throw StateError('delete ${res.statusCode}');
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not delete, check your connection and try again')));
+      }
+      return false;
+    }
+    _mutations++;
+    if (!mounted) return true;
+    setState(() {
+      // Taps saved for this battery can never go through now, and would block the rest.
+      _pending = _pending.where((p) => p.label != battery.label).toList();
+      if (dataOnly) {
+        battery.lastVoltage = null;
+        battery.lastVoltageAt = null;
+      } else {
+        _batteries = _batteries.where((x) => x.label != battery.label).toList();
+      }
+      if (_recommendedLabel == battery.label) {
+        _recommendedLabel = null;
+        _recommendReason = null;
+      }
+    });
+    await _savePending();
+    unawaited(_loadBatteries(silent: true));
+    return true;
+  }
+
   Future<void> _addBattery() async {
     if (_isGuest) return;
     await _dispatchAction(PendingBatteryAction(
@@ -1507,6 +1555,7 @@ class _BatteryScreenState extends State<BatteryScreen>
           onToggleInUse: _toggleInUse,
           onToggleCharging: _toggleCharging,
           onFlag: _flagWeak,
+          onDelete: _deleteBattery,
         ),
       ),
     );

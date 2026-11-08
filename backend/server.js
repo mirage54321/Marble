@@ -1840,6 +1840,35 @@ app.delete('/battery/:label', async (req, res) => {
   }
 });
 
+// Keeps the battery but wipes what was recorded for it: robot-log history and
+// voltage readings (and the "last reading" shown on its icon).
+app.delete('/battery/:label/data', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const label = req.params.label;
+    const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
+    if (!battery) return res.status(404).json({ error: 'Battery not found' });
+
+    const scope = {
+      teamNumber: team.teamNumber,
+      competitionId: team.batteryCompetitionId || 'legacy',
+      label,
+    };
+    const telemetry = await batteryTelemetryCollection.deleteMany(scope);
+    const readings = await batteryReadingsCollection.deleteMany(scope);
+    await batteriesCollection.updateOne(
+      { teamNumber: team.teamNumber, label },
+      { $unset: { lastVoltage: '', lastVoltageAt: '' } },
+    );
+    res.json({ ok: true, deletedLogs: telemetry.deletedCount, deletedReadings: readings.deletedCount });
+  } catch (err) {
+    console.error('Clear battery data error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/battery/recommend', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);

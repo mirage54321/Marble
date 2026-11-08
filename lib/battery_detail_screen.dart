@@ -107,6 +107,10 @@ class BatteryDetailScreen extends StatefulWidget {
   final Future<void> Function(Battery) onToggleCharging;
   final Future<void> Function(Battery) onFlag;
 
+  /// Deletes the battery (or, with dataOnly, just its logs and readings).
+  /// Returns true when it worked.
+  final Future<bool> Function(Battery, {required bool dataOnly}) onDelete;
+
   const BatteryDetailScreen({
     super.key,
     required this.label,
@@ -120,6 +124,7 @@ class BatteryDetailScreen extends StatefulWidget {
     required this.onToggleInUse,
     required this.onToggleCharging,
     required this.onFlag,
+    required this.onDelete,
   });
 
   @override
@@ -426,37 +431,17 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.black.withValues(alpha: 0.07), width: 0.5),
       ),
-      child: Row(children: [
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         BatteryIcon(battery: b, height: 84),
         const SizedBox(width: 18),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Flexible(
-                child: Text(b.displayName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w600)),
-              ),
-              if (!widget.isGuest) ...[
-                const SizedBox(width: 6),
-                TapCursor(
-                  onTap: () async {
-                    await widget.onRename(b);
-                    if (mounted) setState(() {});
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(Icons.edit_outlined, size: 18, color: Colors.grey[600]),
-                  ),
-                ),
-              ],
-            ]),
-            Text(
-                b.name != null && b.name!.trim().isNotEmpty
-                    ? b.label
-                    : (widget.isGuest ? '' : 'Tap the pencil to give it a name'),
-                style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            Text(b.displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w600)),
+            if (b.name != null && b.name!.trim().isNotEmpty)
+              Text(b.label, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
             const SizedBox(height: 8),
             Row(children: [
               Icon(Icons.circle,
@@ -487,8 +472,107 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
             ],
           ]),
         ),
+        if (!widget.isGuest) ...[
+          const SizedBox(width: 8),
+          TapCursor(
+            onTap: () => _showMenu(b),
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                  color: YellorLight, borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.settings_outlined, color: Yellor, size: 18),
+            ),
+          ),
+        ],
       ]),
     );
+  }
+
+  // The gear on the far right: rename, delete, or cancel.
+  void _showMenu(Battery b) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            _menuTile(Icons.edit_outlined, 'Rename', () async {
+              Navigator.pop(ctx);
+              await widget.onRename(b);
+              if (mounted) setState(() {});
+            }),
+            _menuTile(Icons.close, 'Delete', () {
+              Navigator.pop(ctx);
+              _confirmDelete(b);
+            }, color: redChar),
+            const Divider(height: 8),
+            _menuTile(null, 'Cancel', () => Navigator.pop(ctx),
+                color: Colors.grey[600]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _menuTile(IconData? icon, String label, VoidCallback onTap, {Color? color}) {
+    final c = color ?? Colors.black87;
+    return TapCursor(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        child: Row(children: [
+          SizedBox(width: 22, child: icon == null ? null : Icon(icon, size: 20, color: c)),
+          const SizedBox(width: 14),
+          Text(label, style: TextStyle(fontSize: 15, color: c)),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(Battery b) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${b.displayName}?'),
+        content: const Text(
+            'Delete battery removes it and everything recorded for it.\n\n'
+            'Delete its data keeps the battery but clears its robot logs and voltage readings.\n\n'
+            'This can\'t be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'data'),
+              child: const Text('Delete its data')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: redChar),
+              onPressed: () => Navigator.pop(ctx, 'battery'),
+              child: const Text('Delete battery')),
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    final dataOnly = choice == 'data';
+    final ok = await widget.onDelete(b, dataOnly: dataOnly);
+    if (!ok || !mounted) return;
+    if (!dataOnly) {
+      Navigator.pop(context); // the battery is gone, so leave its page
+      return;
+    }
+    setState(() {
+      _readings = null;
+      _health = null;
+      _matches = [];
+      _insightsLoaded = false;
+      _hover = null;
+    });
+    _loadReadings();
+    _loadInsights();
   }
 
   // Manual teams only: the buttons that used to sit on every row.
