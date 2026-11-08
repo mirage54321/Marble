@@ -310,6 +310,36 @@ class _BatteryIconPainter extends CustomPainter {
       old.color != color || old.full != full;
 }
 
+/// A sensor node Marble has heard from, and which battery it is on.
+class _NodeInfo {
+  final String nodeId;
+  final int? number;
+  final String? label;
+  final double? volts;
+  final DateTime? lastSeenAt;
+  final bool connected;
+
+  const _NodeInfo({
+    required this.nodeId,
+    this.number,
+    this.label,
+    this.volts,
+    this.lastSeenAt,
+    required this.connected,
+  });
+
+  factory _NodeInfo.fromJson(Map<String, dynamic> j) => _NodeInfo(
+        nodeId: j['nodeId'] as String? ?? '',
+        number: (j['number'] as num?)?.toInt(),
+        label: j['label'] as String?,
+        volts: (j['volts'] as num?)?.toDouble(),
+        lastSeenAt: DateTime.tryParse(j['lastSeenAt'] as String? ?? ''),
+        connected: j['connected'] == true,
+      );
+
+  String get title => 'Node ${number ?? nodeId}';
+}
+
 class BatteryScreen extends StatefulWidget {
   const BatteryScreen({super.key});
 
@@ -336,9 +366,10 @@ class _BatteryScreenState extends State<BatteryScreen>
   // Whether Marble Connector Desktop has checked in recently (server says).
   bool _collectorConnected = false;
 
-  // Automatic team, but the desktop app is not connected: batteries have
-  // nothing trustworthy to show yet, so say so instead of showing old status.
-  bool get _waitingForCollector => _teamAuto && !_collectorConnected;
+  // Sensor nodes the Pi has heard from (which battery each is on, latest voltage).
+  List<_NodeInfo> _nodes = [];
+  final ValueNotifier<int> _nodesRev = ValueNotifier<int>(0);
+  DateTime _lastRecAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   // Flags are a manual-mode feature (people leave them by hand). Automatic
   // teams never see them, guests included.
@@ -370,6 +401,14 @@ class _BatteryScreenState extends State<BatteryScreen>
       if (_pending.isNotEmpty && !_isGuest) {
         unawaited(_syncPending());
       }
+      if (!_isGuest && teamNum != null) {
+        unawaited(_loadNodes());
+        // Voltages and logs keep changing, so refresh the pick every few minutes.
+        if (_autoMode &&
+            DateTime.now().difference(_lastRecAt) > const Duration(minutes: 3)) {
+          unawaited(_askAiRecommendation(quiet: true));
+        }
+      }
     });
   }
 
@@ -377,6 +416,7 @@ class _BatteryScreenState extends State<BatteryScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
+    _nodesRev.dispose();
     _poller?.cancel();
     super.dispose();
   }
@@ -436,6 +476,7 @@ class _BatteryScreenState extends State<BatteryScreen>
     _autoMode = !guest && _teamAuto;
     await _loadPending();
     await _loadBatteries();
+    unawaited(_loadNodes());
     if (mounted) _startPolling();
 
     // Set by the register screen right after a brand-new account is made.
@@ -514,8 +555,8 @@ class _BatteryScreenState extends State<BatteryScreen>
         }
       });
 
-      if (!silent && _autoMode && _collectorConnected && !_isGuest) {
-        unawaited(_askAiRecommendation());
+      if (!silent && _autoMode && !_isGuest) {
+        unawaited(_askAiRecommendation(quiet: true));
       }
 
       unawaited(_syncPending());
@@ -546,28 +587,24 @@ class _BatteryScreenState extends State<BatteryScreen>
     final auto = mode == 'auto';
     final nowConnected = auto && connected;
     final modeChanged = auto != _teamAuto;
-    final wasConnected = _collectorConnected;
 
     if (modeChanged || nowConnected != _collectorConnected) {
       setState(() {
         _teamAuto = auto;
         _autoMode = auto && !_isGuest;
         _collectorConnected = nowConnected;
-        if (modeChanged || !nowConnected) {
+        if (modeChanged) {
           _recommendedLabel = null;
           _recommendReason = null;
         }
       });
     }
     if (modeChanged) {
+      if (_autoMode && !_isGuest) unawaited(_askAiRecommendation(quiet: true));
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
       } catch (_) {}
-    }
-    // The desktop app just connected: now there is something to recommend from.
-    if (_autoMode && nowConnected && !wasConnected && !_isGuest) {
-      unawaited(_askAiRecommendation());
     }
   }
 
@@ -847,17 +884,23 @@ class _BatteryScreenState extends State<BatteryScreen>
     ));
   }
 
-  Future<void> _askAiRecommendation() async {
-    if (_isGuest || _batteries.isEmpty || _waitingForCollector) return;
-    setState(() => _loadingRecommendation = true);
+  // quiet = a background refresh: no error pop-ups, and the current pick stays on screen.
+  Future<void> _askAiRecommendation({bool quiet = false}) async {
+    if (_isGuest || _batteries.isEmpty) return;
+    _lastRecAt = DateTime.now();
+    if (!quiet || _recommendedLabel == null) {
+      setState(() => _loadingRecommendation = true);
+    }
     try {
-      final res = await http.post(Uri.parse('$_base/battery/recommend'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'teamNumber': teamNum, 'passcode': _passcode}))
+      final res = await http
+          .post(Uri.parse('$_base/battery/recommend'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'teamNumber': teamNum, 'passcode': _passcode}))
           .timeout(const Duration(seconds: 30));
+      if (!mounted) return;
 
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
         setState(() {
           _recommendedLabel = data['recommendedLabel'] as String?;
           _recommendReason = data['reason'] as String?;
@@ -865,16 +908,224 @@ class _BatteryScreenState extends State<BatteryScreen>
         });
       } else {
         setState(() => _loadingRecommendation = false);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Could not get a recommendation')));
+        if (!quiet) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not get a recommendation')));
+        }
       }
     } catch (e) {
-      setState(() => _loadingRecommendation = false);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Could not connect, try again')));
+      setState(() => _loadingRecommendation = false);
+      if (!quiet) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not connect, try again')));
+      }
     }
+  }
+
+  // ---------- sensor nodes ----------
+
+  Future<void> _loadNodes() async {
+    if (_isGuest || teamNum == null) return;
+    try {
+      final res = await http
+          .get(
+              Uri.parse(
+                  '$_base/battery/nodes?teamNumber=${Uri.encodeQueryComponent(teamNum!)}'),
+              headers: {'X-Team-Passcode': _passcode ?? ''})
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200 || !mounted) return;
+      _applyNodes(jsonDecode(res.body) as Map<String, dynamic>);
+    } catch (_) {
+      // Keep showing the last list.
+    }
+  }
+
+  void _applyNodes(Map<String, dynamic> data) {
+    final list = (data['nodes'] as List<dynamic>? ?? [])
+        .map((n) => _NodeInfo.fromJson(n as Map<String, dynamic>))
+        .toList();
+    setState(() => _nodes = list);
+    _nodesRev.value++;
+  }
+
+  /// Puts a node on a different battery ('' = none). Marble swaps if another node had it.
+  /// Returns an error message, or null when it worked.
+  Future<String?> _assignNode(_NodeInfo node, String label) async {
+    try {
+      final res = await http
+          .post(Uri.parse('$_base/battery/nodes/assign'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'teamNumber': teamNum,
+                'passcode': _passcode,
+                'nodeId': node.nodeId,
+                'label': label.isEmpty ? null : label,
+              }))
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) {
+        try {
+          return (jsonDecode(res.body) as Map<String, dynamic>)['error'] as String? ??
+              'Could not change it';
+        } catch (_) {
+          return 'Could not change it';
+        }
+      }
+      if (!mounted) return null;
+      _mutations++;
+      _applyNodes(jsonDecode(res.body) as Map<String, dynamic>);
+      unawaited(_loadBatteries(silent: true)); // so the icons follow right away
+      if (_autoMode) unawaited(_askAiRecommendation(quiet: true));
+      return null;
+    } catch (_) {
+      return 'Could not connect, try again';
+    }
+  }
+
+  String _nodeBatteryName(String? label) {
+    for (final b in _batteries) {
+      if (b.label == label) return b.displayName;
+    }
+    return 'no battery';
+  }
+
+  // Bottom-right button. Hover (or long-press on a phone) lists the nodes that are
+  // sending; tapping opens the sheet where each node's battery can be changed.
+  Widget _nodesButton() {
+    final active = _nodes.where((n) => n.connected).toList();
+    final lines = active.isEmpty
+        ? 'No nodes sending right now'
+        : '${active.length} node${active.length == 1 ? '' : 's'} active\n' +
+            active
+                .map((n) =>
+                    '${n.title} → ${_nodeBatteryName(n.label)}${n.volts != null ? ' · ${n.volts!.toStringAsFixed(2)} V' : ''}')
+                .join('\n');
+    return Stack(clipBehavior: Clip.none, children: [
+      FloatingActionButton(
+        heroTag: 'nodes-button',
+        tooltip: '$lines\nTap to change which battery each node is on',
+        backgroundColor: Yellor,
+        foregroundColor: Colors.black87,
+        onPressed: _showNodes,
+        child: const Icon(Icons.sensors),
+      ),
+      if (active.isNotEmpty)
+        Positioned(
+          top: -2,
+          right: -2,
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 5),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: nodeOnColor,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white, width: 2),
+            ),
+            child: Text('${active.length}',
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+          ),
+        ),
+    ]);
+  }
+
+  void _showNodes() {
+    unawaited(_loadNodes());
+    final error = ValueNotifier<String?>(null);
+    final busy = ValueNotifier<String?>(null);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: AnimatedBuilder(
+          animation: Listenable.merge([_nodesRev, error, busy]),
+          builder: (ctx, _) => SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Sensor nodes',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text(
+                    'Pick which battery each node is on. If that battery already has a node, the two swap.',
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey[600])),
+                const SizedBox(height: 12),
+                if (_nodes.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Text(
+                        'No sensor nodes have reported yet. Turn on a node and the Pi. It shows up here once Marble hears from it.',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                  ),
+                for (final n in _nodes) _nodeRow(n, busy, error),
+                if (error.value != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(error.value!,
+                        style: const TextStyle(color: redChar, fontSize: 13)),
+                  ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                      onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _nodeRow(
+      _NodeInfo n, ValueNotifier<String?> busy, ValueNotifier<String?> error) {
+    final status = n.connected
+        ? 'Sending${n.volts != null ? ' · ${n.volts!.toStringAsFixed(2)} V' : ''}'
+        : n.lastSeenAt == null
+            ? 'Not connected'
+            : 'Not connected · last seen ${timeAgoText(DateTime.now().difference(n.lastSeenAt!))}';
+    final known = n.label != null && _batteries.any((b) => b.label == n.label);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: Colors.black.withValues(alpha: 0.07)))),
+      child: Row(children: [
+        Icon(Icons.circle, size: 10, color: n.connected ? nodeOnColor : nodeOffColor),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(n.title,
+                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+            Text(status, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+          ]),
+        ),
+        DropdownButton<String>(
+          value: known ? n.label : '',
+          underline: const SizedBox.shrink(),
+          items: [
+            const DropdownMenuItem<String>(value: '', child: Text('No battery')),
+            for (final b in _batteries)
+              DropdownMenuItem<String>(value: b.label, child: Text(b.displayName)),
+          ],
+          onChanged: busy.value != null
+              ? null
+              : (v) async {
+                  if (v == null) return;
+                  busy.value = n.nodeId;
+                  error.value = null;
+                  final err = await _assignNode(n, v);
+                  busy.value = null;
+                  error.value = err;
+                },
+        ),
+      ]),
+    );
   }
 
   Future<void> _flagWeak(Battery battery) async {
@@ -1375,7 +1626,19 @@ class _BatteryScreenState extends State<BatteryScreen>
   String _fmtCeilMinutes(Duration d) => fmtCeilMinutes(d);
   String _chargedLabel(Battery b) => batteryChargedLabel(b);
 
+  // The pick for guests (who can't ask the server). Connector teams have no charge or
+  // in-use flags, so go by the nodes: a connected, well-charged battery first.
   Battery _localRecommended() {
+    if (_teamAuto) {
+      final ok = _batteries
+          .where((b) => !b.nodeConnected || (b.lastVoltage ?? 0) >= 11.8)
+          .toList()
+        ..sort((a, b) {
+          if (a.nodeConnected != b.nodeConnected) return a.nodeConnected ? -1 : 1;
+          return (b.lastVoltage ?? 0).compareTo(a.lastVoltage ?? 0);
+        });
+      return ok.isNotEmpty ? ok.first : _batteries.first;
+    }
     for (final b in _batteries) {
       if (!b.isInUse && !b.isDead && (!b.isCharging || b.isChargingComplete)) {
         return b;
@@ -1394,6 +1657,7 @@ class _BatteryScreenState extends State<BatteryScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 255, 255, 248),
+      floatingActionButton: _isGuest ? null : _nodesButton(),
       body: SafeArea(
         child: Column(children: [
           _topBar(),
@@ -1529,7 +1793,7 @@ class _BatteryScreenState extends State<BatteryScreen>
 
   // The recommended battery: Marble's AI pick, or a simple local pick for guests.
   String? get _suggestedLabel {
-    if (_waitingForCollector || _batteries.isEmpty) return null;
+    if (_batteries.isEmpty) return null;
     if (_isGuest) return _localRecommended().label;
     return _recommendedLabel;
   }
@@ -1562,7 +1826,7 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Widget _list() {
-    return ListView(padding: const EdgeInsets.all(16), children: [
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 96), children: [
       if (_error != null) _offlineBanner(_error!),
       if (_pending.isNotEmpty) _pendingBanner(),
       _suggestionBar(),
@@ -1587,24 +1851,7 @@ class _BatteryScreenState extends State<BatteryScreen>
           child: Row(children: children),
         );
 
-    if (_waitingForCollector) {
-      return strip([
-        const SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(strokeWidth: 2, color: YellorDark)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-              _isGuest
-                  ? 'Waiting for Marble Connector Desktop to connect.'
-                  : 'Waiting for Marble Connector Desktop. Open it on your computer and sign in as team $teamNum.',
-              style: const TextStyle(fontSize: 12.5, color: YellorDark)),
-        ),
-      ]);
-    }
-
-    if (_loadingRecommendation) {
+    if (_loadingRecommendation && _suggestedLabel == null) {
       return strip([
         const SizedBox(
             width: 14,
@@ -1625,7 +1872,9 @@ class _BatteryScreenState extends State<BatteryScreen>
     }
 
     if (picked != null) {
-      final reason = _isGuest ? _chargedLabel(picked) : _recommendReason;
+      final reason = _isGuest
+          ? (_teamAuto ? batteryNodeLine(picked) : _chargedLabel(picked))
+          : _recommendReason;
       return strip([
         const Icon(Icons.auto_awesome, color: YellorDark, size: 18),
         const SizedBox(width: 10),
@@ -1698,7 +1947,6 @@ class _BatteryScreenState extends State<BatteryScreen>
 
   // One small tag per battery, most important first.
   Widget? _tileTag(Battery b, bool suggested) {
-    if (_waitingForCollector) return null;
     if (b.isInUse) return _pill('IN USE', redChar, Colors.white);
     if (!_autoMode) {
       if (b.isDead) {

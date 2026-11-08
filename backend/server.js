@@ -829,17 +829,63 @@ function healthPenalty(health) {
   return 0;
 }
 
-const STATE_RANK = { charged_ready: 0, available: 0, charging: 1 };
+// Lower rank = better to grab. 'low' (flat or under load) is never recommended while
+// anything else is available.
+const STATE_RANK = { charged_ready: 0, available: 0, partial: 1, recently_used: 1, charging: 1 };
+const NODE_FRESH_MS = 5 * 60 * 1000;
 
-function recommendableBatteries(batteries, now = Date.now()) {
+// Teams in Connector mode never press Use / Charge, so Marble has no "in use" or
+// "charged" flags for them. Work it out from what Marble does see: the battery node's
+// latest voltage, and when the last robot log for the battery came in.
+function autoBatteryState(battery, lastLogMs, now) {
+  const seen = battery.lastVoltageAt ? new Date(battery.lastVoltageAt).getTime() : 0;
+  const volts = Number.isFinite(battery.lastVoltage) ? battery.lastVoltage : null;
+  if (volts !== null && now - seen < NODE_FRESH_MS) {
+    if (volts < 11.8) return { state: 'low', volts };
+    if (volts < 12.4) return { state: 'partial', volts };
+    return { state: 'charged_ready', volts };
+  }
+  if (lastLogMs && now - lastLogMs < BATTERY_COOLDOWN_MINUTES * 60000) {
+    return { state: 'recently_used', minutesAgo: Math.max(1, Math.round((now - lastLogMs) / 60000)) };
+  }
+  return { state: 'available' };
+}
+
+// ctx = { auto: boolean, lastLogMs: Map(label -> ms of the newest robot log) }
+function stateFor(battery, now, ctx) {
+  return ctx && ctx.auto
+    ? autoBatteryState(battery, ctx.lastLogMs.get(battery.label) || 0, now)
+    : getBatteryState(battery, now);
+}
+
+// Newest of "someone pressed Use" and "a robot log arrived", so rotation works in both modes.
+function lastUsedMsFor(battery, ctx) {
+  const own = new Date(battery.lastUsedAt).getTime() || 0;
+  return Math.max(own, (ctx && ctx.lastLogMs && ctx.lastLogMs.get(battery.label)) || 0);
+}
+
+function recommendableBatteries(batteries, now = Date.now(), ctx = null) {
   return batteries
-    .map((battery) => ({ battery, info: getBatteryState(battery, now) }))
+    .map((battery) => ({ battery, info: stateFor(battery, now, ctx) }))
     .filter(({ info }) => info.state in STATE_RANK);
 }
 
-function fallbackRecommendation(batteries, reason, healthByLabel = new Map()) {
+function describePick(c, healthByLabel) {
+  const info = c.info;
+  const parts = [];
+  if (info.state === 'charged_ready') parts.push(info.volts ? `${info.volts.toFixed(1)} V and ready` : 'Fully charged');
+  else if (info.state === 'charging') parts.push(`Charging, ${info.chargeLeft} min left`);
+  else if (info.state === 'partial') parts.push(`${info.volts.toFixed(1)} V, not fully charged`);
+  else if (info.state === 'recently_used') parts.push(`Used ${info.minutesAgo} min ago`);
+  else parts.push('Ready to go');
+  const health = healthByLabel.get(c.battery.label);
+  if (health && health.status === 'healthy') parts.push('healthy in match logs');
+  return parts.join(', ');
+}
+
+function fallbackRecommendation(batteries, reason, healthByLabel = new Map(), ctx = null) {
   const now = Date.now();
-  const candidates = recommendableBatteries(batteries, now);
+  const candidates = recommendableBatteries(batteries, now, ctx);
 
   if (candidates.length > 0) {
     candidates.sort((a, b) => {
@@ -850,25 +896,34 @@ function fallbackRecommendation(batteries, reason, healthByLabel = new Map()) {
       if (health !== 0) return health;
       const flags = batteryFlagScore(a.battery, now) - batteryFlagScore(b.battery, now);
       if (flags !== 0) return flags;
-      if (a.info.state === 'charging') return a.info.chargeLeft - b.info.chargeLeft;
-      return (
-        new Date(a.battery.lastUsedAt).getTime() - new Date(b.battery.lastUsedAt).getTime()
-      );
+      if (a.info.state === 'charging' && b.info.state === 'charging') return a.info.chargeLeft - b.info.chargeLeft;
+      // Equal otherwise: the one rested longest, so use spreads out evenly.
+      const rest = lastUsedMsFor(a.battery, ctx) - lastUsedMsFor(b.battery, ctx);
+      if (rest !== 0) return rest;
+      return String(a.battery.label).localeCompare(String(b.battery.label), undefined, { numeric: true });
     });
     return {
       recommendedLabel: candidates[0].battery.label,
-      reason: reason || 'Charged and has the fewest recent problems',
+      reason: reason || describePick(candidates[0], healthByLabel),
     };
   }
 
-  const notInUse = batteries
-    .map((battery) => ({ battery, info: getBatteryState(battery, now) }))
+  // Nothing is ready. Point at the one that gets ready soonest.
+  const waiting = batteries
+    .map((battery) => ({ battery, info: stateFor(battery, now, ctx) }))
     .filter(({ info }) => info.state !== 'in_use');
-  const pick = notInUse[0];
+  const wait = ({ info }) => {
+    if (info.state === 'low') return -(info.volts || 0);           // fullest of the flat ones
+    if (info.state === 'dead_needs_charge') return 0;              // can go on the charger now
+    if (info.state === 'dead_cooling_down') return info.cooldownLeft;
+    return 1000;
+  };
+  waiting.sort((a, b) => wait(a) - wait(b));
+  const pick = waiting[0];
   return {
-    recommendedLabel: pick ? pick.battery.label : batteries[0] ? batteries[0].label : null,
+    recommendedLabel: pick ? pick.battery.label : null,
     reason: batteries.length
-      ? 'Nothing is charged right now, charge one first'
+      ? (ctx && ctx.auto ? 'Nothing looks charged right now, charge one first' : 'Nothing is charged right now, charge one first')
       : 'No batteries logged yet',
   };
 }
@@ -1288,7 +1343,10 @@ app.post('/battery/reset', async (req, res) => {
     const result = await batteriesCollection.deleteMany({ teamNumber: team.teamNumber });
     await teamsCollection.updateOne(
       { teamNumber: team.teamNumber },
-      { $set: { batteryCompetitionId: new Date().toISOString() } },
+      {
+        $set: { batteryCompetitionId: new Date().toISOString() },
+        $unset: { batteryNodeMap: '', batteryNodes: '' },
+      },
     );
     res.json({ ok: true, deletedCount: result.deletedCount });
   } catch (err) {
@@ -1618,16 +1676,70 @@ function downsampleReadings(points, maxPoints) {
   return out;
 }
 
+// ---- Which battery is each sensor node on? ----
+// A node (B1, B2, ...) is matched to a battery in this order:
+//   1) what the team picked in the app (team.batteryNodeMap; null = deliberately none)
+//   2) the label the Pi sent along (from its marble.json)
+//   3) the battery whose label has the same number (node 3 -> B3)
+// Every node that reports is remembered in team.batteryNodes, so the apps can list the
+// active nodes and let people change which battery each one is on.
+const NODE_ID_RE = /^[A-Za-z0-9_-]{1,20}$/;
+
+function numberIn(text) {
+  const m = /\d+/.exec(String(text || ''));
+  return m ? Number(m[0]) : null;
+}
+
+function defaultLabelForNode(nodeId, batteries) {
+  const n = numberIn(nodeId);
+  if (n === null) return null;
+  const hit = batteries.find((b) => numberIn(b.label) === n);
+  return hit ? hit.label : null;
+}
+
+function effectiveNodeLabel(team, nodeId, batteries) {
+  const map = team.batteryNodeMap || {};
+  let label;
+  if (Object.prototype.hasOwnProperty.call(map, nodeId)) label = map[nodeId];
+  else label = (team.batteryNodes && team.batteryNodes[nodeId] && team.batteryNodes[nodeId].label) ||
+    defaultLabelForNode(nodeId, batteries);
+  return label && batteries.some((b) => b.label === label) ? label : null;
+}
+
+function nodesPayload(team, batteries) {
+  const now = Date.now();
+  const seen = team.batteryNodes || {};
+  const nodes = Object.entries(seen).map(([nodeId, s]) => {
+    const at = s && s.at ? new Date(s.at).getTime() : 0;
+    return {
+      nodeId,
+      number: numberIn(nodeId),
+      label: effectiveNodeLabel(team, nodeId, batteries),
+      volts: s && Number.isFinite(s.volts) ? s.volts : null,
+      lastSeenAt: s && s.at ? s.at : null,
+      connected: now - at < NODE_FRESH_MS,
+    };
+  }).sort((a, b) => (a.number ?? 1e9) - (b.number ?? 1e9) || a.nodeId.localeCompare(b.nodeId));
+  return {
+    nodes,
+    batteries: batteries
+      .map((b) => ({ label: b.label, name: b.name || null }))
+      .sort((a, b) => (numberIn(a.label) ?? 1e9) - (numberIn(b.label) ?? 1e9) || a.label.localeCompare(b.label)),
+  };
+}
+
 app.post('/battery/reading', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
 
-    const label = cleanString(req.body.label);
     const readingId = cleanString(req.body.readingId);
     const volts = Number(req.body.volts);
     const at = new Date(req.body.at);
-    if (!label) return res.status(400).json({ error: 'label is required' });
+    const nodeId = cleanString(req.body.nodeId) || '';
+    const validNode = NODE_ID_RE.test(nodeId);
+    let label = cleanString(req.body.label);
+    if (!label && !validNode) return res.status(400).json({ error: 'label or nodeId is required' });
     if (!readingId || readingId.length > 80) return res.status(400).json({ error: 'readingId is required' });
     if (req.body.volts === null || req.body.volts === '' || !Number.isFinite(volts) || volts < 0 || volts > 40) {
       return res.status(400).json({ error: 'volts must be a number from 0 to 40' });
@@ -1637,10 +1749,35 @@ app.post('/battery/reading', async (req, res) => {
       return res.status(400).json({ error: 'at must be a recent time' });
     }
 
-    const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
-    if (!battery) return res.status(404).json({ error: 'Battery not found' });
-
+    const batteries = await batteriesCollection.find({ teamNumber: team.teamNumber }).project({ label: 1 }).toArray();
     const rounded = Math.round(volts * 1000) / 1000;
+    const atIso = at.toISOString();
+
+    // Which battery is this node on?
+    let source = 'pi';
+    const map = team.batteryNodeMap || {};
+    if (validNode && Object.prototype.hasOwnProperty.call(map, nodeId)) {
+      label = map[nodeId] || '';
+      source = 'map';
+    } else if (!label && validNode) {
+      label = defaultLabelForNode(nodeId, batteries) || '';
+      source = 'default';
+    }
+    const exists = label && batteries.some((b) => b.label === label);
+    if (label && !exists && source === 'pi') return res.status(404).json({ error: 'Battery not found' });
+
+    // Remember the node (even with no battery) so the apps can offer it for assignment.
+    if (validNode) {
+      const prev = team.batteryNodes && team.batteryNodes[nodeId];
+      if (!prev || !prev.at || prev.at < atIso) {
+        await teamsCollection.updateOne(
+          { teamNumber: team.teamNumber },
+          { $set: { [`batteryNodes.${nodeId}`]: { volts: rounded, at: atIso, label: exists ? label : null } } },
+        );
+      }
+    }
+    if (!exists) return res.json({ ok: true, unassigned: true });
+
     try {
       await batteryReadingsCollection.insertOne({
         teamNumber: team.teamNumber,
@@ -1648,7 +1785,7 @@ app.post('/battery/reading', async (req, res) => {
         label,
         volts: rounded,
         at,
-        nodeId: (cleanString(req.body.nodeId) || '').slice(0, 20),
+        nodeId: nodeId.slice(0, 20),
         readingId,
         createdAt: new Date(),
       });
@@ -1659,7 +1796,6 @@ app.post('/battery/reading', async (req, res) => {
 
     // "Added to the battery": the newest reading also lives on the battery itself.
     // Only moves forward, so a Pi catching up on old readings can't overwrite it.
-    const atIso = at.toISOString();
     await batteriesCollection.updateOne(
       {
         teamNumber: team.teamNumber,
@@ -1671,6 +1807,79 @@ app.post('/battery/reading', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('Battery reading save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// The sensor nodes that have reported, which battery each is on, and the batteries to pick from.
+app.get('/battery/nodes', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+    const batteries = await batteriesCollection.find({ teamNumber: team.teamNumber }).toArray();
+    res.json(nodesPayload(team, batteries));
+  } catch (err) {
+    console.error('Nodes error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Put a node on a different battery. If another node already has that battery the two
+// swap, so no battery ends up with two nodes. label null/'' = no battery.
+app.post('/battery/nodes/assign', async (req, res) => {
+  try {
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    const nodeId = cleanString(req.body.nodeId) || '';
+    const target = cleanString(req.body.label) || null;
+    const seen = team.batteryNodes || {};
+    if (!NODE_ID_RE.test(nodeId) || !seen[nodeId]) return res.status(404).json({ error: 'Node not found' });
+
+    const batteries = await batteriesCollection.find({ teamNumber: team.teamNumber }).toArray();
+    if (target && !batteries.some((b) => b.label === target)) {
+      return res.status(404).json({ error: 'Battery not found' });
+    }
+
+    const before = {};
+    for (const id of Object.keys(seen)) before[id] = effectiveNodeLabel(team, id, batteries);
+
+    const map = { ...(team.batteryNodeMap || {}) };
+    if (target) {
+      for (const other of Object.keys(seen)) {
+        if (other !== nodeId && before[other] === target) map[other] = before[nodeId] || null;
+      }
+    }
+    map[nodeId] = target;
+    await teamsCollection.updateOne({ teamNumber: team.teamNumber }, { $set: { batteryNodeMap: map } });
+    team.batteryNodeMap = map;
+
+    // Make the icons follow right away: batteries that lost their node stop showing a
+    // reading, and batteries that gained one show that node's newest reading.
+    const after = {};
+    for (const id of Object.keys(seen)) after[id] = effectiveNodeLabel(team, id, batteries);
+    const nowOn = new Set(Object.values(after).filter(Boolean));
+    for (const label of new Set(Object.values(before).filter(Boolean))) {
+      if (!nowOn.has(label)) {
+        await batteriesCollection.updateOne(
+          { teamNumber: team.teamNumber, label },
+          { $unset: { lastVoltage: '', lastVoltageAt: '' } },
+        );
+      }
+    }
+    for (const [id, label] of Object.entries(after)) {
+      if (label && seen[id] && Number.isFinite(seen[id].volts)) {
+        await batteriesCollection.updateOne(
+          { teamNumber: team.teamNumber, label },
+          { $set: { lastVoltage: seen[id].volts, lastVoltageAt: seen[id].at } },
+        );
+      }
+    }
+
+    const fresh = await batteriesCollection.find({ teamNumber: team.teamNumber }).toArray();
+    res.json(nodesPayload(team, fresh));
+  } catch (err) {
+    console.error('Assign node error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1898,11 +2107,20 @@ app.post('/battery/recommend', async (req, res) => {
       summarizeBatteryTelemetry(recordsByLabel.get(battery.label) || []),
     ]));
 
+    // Connector teams have no Use / Charge buttons, so learn when each battery last ran
+    // from its newest robot log.
+    const lastLogMs = new Map();
+    for (const record of telemetry) {
+      const t = new Date(record.enabledStartAt || record.createdAt).getTime();
+      if (Number.isFinite(t) && t > (lastLogMs.get(record.label) || 0)) lastLogMs.set(record.label, t);
+    }
+    const ctx = { auto: teamMode(team) === 'auto', lastLogMs };
+
     const now = Date.now();
-    const candidates = recommendableBatteries(batteries, now);
+    const candidates = recommendableBatteries(batteries, now, ctx);
 
     if (candidates.length === 0) {
-      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
+      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel, ctx));
     }
 
     if (candidates.length === 1) {
@@ -1913,7 +2131,7 @@ app.post('/battery/recommend', async (req, res) => {
     }
 
     if (!GEMINI_API_KEY) {
-      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
+      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel, ctx));
     }
 
     const summary = candidates
@@ -1922,10 +2140,14 @@ app.post('/battery/recommend', async (req, res) => {
           info.state === 'charging'
             ? `still charging (${info.chargeLeft} min left)`
             : info.state === 'charged_ready'
-              ? 'fully charged and ready'
-              : 'available';
+              ? (info.volts ? `charged, ${info.volts.toFixed(1)} V on its sensor` : 'fully charged and ready')
+              : info.state === 'partial'
+                ? `partly charged, ${info.volts.toFixed(1)} V on its sensor`
+                : info.state === 'recently_used'
+                  ? `used ${info.minutesAgo} min ago, may not be recharged yet`
+                  : 'available';
 
-        const lastUsed = new Date(battery.lastUsedAt).getTime();
+        const lastUsed = lastUsedMsFor(battery, ctx);
         const lastUsedText =
           lastUsed > BATTERY_EPOCH_MS ? `last used ${formatAge(now - lastUsed)}` : 'never used yet';
 
@@ -1957,7 +2179,8 @@ app.post('/battery/recommend', async (req, res) => {
       `Read what each note actually says. NEVER judge by the number of flags.\n` +
       `- Ignore positive or neutral notes when looking for problems. Treat notes about low or 0 voltage, dying mid-match, brownouts, swelling, or overheating as serious.\n` +
       `- Recent notes matter more than old ones. One serious recent problem outweighs many old or positive notes.\n` +
-      `- Strongly prefer fully charged/available batteries over ones still charging.\n` +
+      `- Strongly prefer fully charged/available batteries over ones still charging, partly charged, or just used.\n` +
+      `- Telemetry "avoid" means the battery browned out or fell below 7 V in a match: never pick it if another battery is fine.\n` +
       `- If batteries are otherwise equal, prefer the one used least recently so use is spread evenly.\n` +
       `- If a battery has a nickname, use the nickname (not the B-number) when you write the reason.\n\n` +
       `Respond ONLY with valid JSON, no markdown, and recommendedLabel must be one of the labels above:\n` +
@@ -1976,14 +2199,24 @@ app.post('/battery/recommend', async (req, res) => {
       ?.trim();
 
     if (status < 200 || status >= 300 || !rawText) {
-      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
+      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel, ctx));
     }
 
     try {
       const parsed = JSON.parse(rawText);
-      const valid = candidates.some(({ battery }) => battery.label === parsed.recommendedLabel);
-      if (!valid) {
-        return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
+      const picked = candidates.find(({ battery }) => battery.label === parsed.recommendedLabel);
+      // Don't trust the model over the rules: it must not pick something worse than what
+      // is plainly on offer (a charging battery while a ready one exists, or a flagged-bad one).
+      const bestRank = Math.min(...candidates.map((c) => STATE_RANK[c.info.state]));
+      const bestHealth = Math.min(...candidates
+        .filter((c) => STATE_RANK[c.info.state] === bestRank)
+        .map((c) => healthPenalty(healthByLabel.get(c.battery.label))));
+      const worse = picked && (
+        STATE_RANK[picked.info.state] > bestRank ||
+        healthPenalty(healthByLabel.get(picked.battery.label)) > bestHealth
+      );
+      if (!picked || worse) {
+        return res.json(fallbackRecommendation(batteries, undefined, healthByLabel, ctx));
       }
       return res.json({
         recommendedLabel: parsed.recommendedLabel,
@@ -1991,7 +2224,7 @@ app.post('/battery/recommend', async (req, res) => {
       });
     } catch (parseErr) {
       console.error('Gemini JSON parse error:', parseErr);
-      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel));
+      return res.json(fallbackRecommendation(batteries, undefined, healthByLabel, ctx));
     }
   } catch (err) {
     console.error('Recommend error:', err);
