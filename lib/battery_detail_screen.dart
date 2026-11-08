@@ -47,11 +47,11 @@ class _Match {
       );
 }
 
-// What /battery/health says about one battery. Rough for now: the checks below
-// are built from it, so a better model can replace the backend logic later
-// without touching this screen.
+
+
+
 class _Health {
-  final String status; // healthy | monitor | avoid | not_enough_data
+  final String status;
   final String reason;
   final int matchCount;
   final int brownoutMatches;
@@ -82,14 +82,14 @@ class _Health {
 }
 
 class _Check {
-  final String status; // good | warn | bad | info
+  final String status;
   final String title;
   final String detail;
   const _Check(this.status, this.title, this.detail);
 }
 
-/// One battery: its voltage graph, its numbers, and how Marble reads it.
-/// Opened by tapping a battery on the Battery tracker.
+
+
 class BatteryDetailScreen extends StatefulWidget {
   final String label;
   final String team;
@@ -98,8 +98,8 @@ class BatteryDetailScreen extends StatefulWidget {
   final bool autoMode;
   final bool showFlags;
 
-  /// Returns the newest copy of this battery (the tracker replaces its list on
-  /// every refresh), or null if it no longer exists.
+
+
   final Battery? Function() lookup;
 
   final Future<void> Function(Battery) onRename;
@@ -107,8 +107,8 @@ class BatteryDetailScreen extends StatefulWidget {
   final Future<void> Function(Battery) onToggleCharging;
   final Future<void> Function(Battery) onFlag;
 
-  /// Deletes the battery (or, with dataOnly, just its logs and readings).
-  /// Returns true when it worked.
+
+
   final Future<bool> Function(Battery, {required bool dataOnly}) onDelete;
 
   const BatteryDetailScreen({
@@ -159,7 +159,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
       _loadReadings();
       _loadInsights();
     }
-    // Keeps the node status, voltage and button states fresh while this page is open.
+
     _ticker = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
       setState(() {});
@@ -214,7 +214,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     } finally {
       _loadingReadings = false;
     }
-    // The range changed while this one was loading: load the newer one too.
+
     if (mounted && hours != _hours) _loadReadings();
   }
 
@@ -273,7 +273,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     }
   }
 
-  // ---------- numbers ----------
+
 
   double? _median(List<double> v) {
     if (v.isEmpty) return null;
@@ -346,7 +346,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     }
   }
 
-  // ---------- build ----------
+
 
   @override
   Widget build(BuildContext context) {
@@ -489,7 +489,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     );
   }
 
-  // The gear on the far right: rename, delete, or cancel.
+
   void _showMenu(Battery b) {
     showModalBottomSheet(
       context: context,
@@ -561,7 +561,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     final ok = await widget.onDelete(b, dataOnly: dataOnly);
     if (!ok || !mounted) return;
     if (!dataOnly) {
-      Navigator.pop(context); // the battery is gone, so leave its page
+      Navigator.pop(context);
       return;
     }
     setState(() {
@@ -575,7 +575,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     _loadInsights();
   }
 
-  // Manual teams only: the buttons that used to sit on every row.
+
   Widget _actions(Battery b) {
     final charging = b.isCharging && !b.isDead;
     Widget button(String text, Color bg, Color fg, VoidCallback onTap) =>
@@ -638,7 +638,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     ]);
   }
 
-  // ---------- voltage graph ----------
+
 
   Widget _rangeButtons() {
     return Row(mainAxisSize: MainAxisSize.min, children: [
@@ -769,7 +769,7 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     return '$day$h12:$mm $ap';
   }
 
-  // ---------- numbers + analysis ----------
+
 
   Widget _statsSection() {
     if (_matches.isEmpty) return const SizedBox.shrink();
@@ -947,8 +947,8 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
   }
 }
 
-// Draws one battery's voltage line, like a scope. Gaps in the data (node off,
-// out of range) break the line instead of joining across them.
+
+
 class _GraphPainter extends CustomPainter {
   final List<_Reading> points;
   final DateTime now;
@@ -1040,7 +1040,7 @@ class _GraphPainter extends CustomPainter {
                   : TextAlign.center);
     }
 
-    final gap = (span / 200) > 300000 ? span / 200 : 300000.0; // at least 5 min
+    final gap = (span / 200) > 300000 ? span / 200 : 300000.0;
     final line = Paint()
       ..color = nodeOnColor
       ..style = PaintingStyle.stroke

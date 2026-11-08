@@ -159,10 +159,10 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen> {
     }
   }
 
-  // Fires whenever the plugin updates CameraController.value — including
-  // when the OS/hardware forcibly closes the camera (physical disconnect,
-  // another app stealing it, etc). That case surfaces as `value.hasError`
-  // rather than as a thrown exception, so it's easy to miss.
+
+
+
+
   void _onCameraValueChanged() {
     final value = camera?.value;
     if (value != null && value.hasError) {
@@ -171,7 +171,7 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen> {
   }
 
   void _handleCameraLost(String? reason) {
-    if (_cameraLost) return; // avoid re-entering while we're tearing down
+    if (_cameraLost) return;
     _cameraLost = true;
 
     debugPrint('Camera disconnected: $reason');
@@ -293,16 +293,16 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen> {
       if (!mounted) return;
       Navigator.pop(context, bytes);
     } catch (e) {
-      if (_cameraLost) return; // _handleCameraLost already updated state
+      if (_cameraLost) return;
       if (!mounted) return;
       setState(() => snapping = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Capture failed: $e')),
       );
       if (!kIsWeb) {
-        // Only try to resume streaming if the controller is still alive —
-        // restarting a stream on a disconnected/errored camera is what
-        // used to throw again here and crash the flow.
+
+
+
         final stillGood = camera != null &&
             camera!.value.isInitialized &&
             !camera!.value.hasError;

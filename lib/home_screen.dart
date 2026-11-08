@@ -8,7 +8,7 @@ import 'batteryLOGIN_screen.dart';
 import 'battery_match_logs_screen.dart';
 import 'match_notifier_screen.dart';
 
-// flutter run -d web-server --web-hostname 0.0.0.0 --web-port 8080
+
 
 const pinkConstant = Color(0xFFCF2879);
 const yellowConstant = Color(0xFFFFC107);
@@ -157,7 +157,7 @@ class HomeScreen extends StatelessWidget {
                         rules(context),
                         battery(context),
                         stats(context),
-                        // batteryMatchLogs(context),
+
                         const SizedBox(height: 24),
                         const SizedBox(height: 16),
                       ],
@@ -221,40 +221,40 @@ class HomeScreen extends StatelessWidget {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      //   child: Row(
-      //     children: [
-      //       Container(
-      //         width: 32,
-      //         height: 32,
-      //         decoration: BoxDecoration(
-      //           color: grayConstant,
-      //           borderRadius: BorderRadius.circular(10),
-      //         ),
-      //         clipBehavior: Clip.antiAlias,
-      //         child: Image.asset(
-      //           'web/icons/Icon-111.png',
-      //           fit: BoxFit.cover,
-      //         ),
-      //       ),
-      //       const SizedBox(width: 8),
-      //       RichText(
-      //         text: const TextSpan(
-      //           style: TextStyle(
-      //               fontSize: 18,
-      //               fontWeight: FontWeight.w500,
-      //               color: Colors.black),
-      //           children: [
-      //             TextSpan(text: 'Robo'),
-      //             TextSpan(text: 'L', style: TextStyle(color: pinkConstant)),
-      //             TextSpan(text: 'e', style: TextStyle(color: TealScan)),
-      //             TextSpan(text: 'n', style: TextStyle(color: yellowConstant)),
-      //             TextSpan(text: 's', style: TextStyle(color: orangeConstant)),
-      //           ],
-      //         ),
-      //       ),
-      //       const Spacer(),
-      //     ],
-      //   ),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     );
   }
 

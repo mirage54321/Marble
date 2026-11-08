@@ -190,7 +190,7 @@ class MatchStatsTabState extends State<MatchStatsTab> {
       if (searchedTeam == null) {
         return const SizedBox.shrink();
       }
-   
+
       final list = [
         ...searchedNearby,
         if (!searchedNearby.any(

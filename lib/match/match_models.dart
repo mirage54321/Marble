@@ -36,7 +36,7 @@ class MatchInfo {
 
   DateTime? get bestTime => predictedTime ?? actualTime;
 
-  /// "Red 3" / "Blue 1" for the given team, or null if it isn't in this match.
+
   String? slotLabel(String teamKey) {
     final redIdx = redTeams.indexOf(teamKey);
     if (redIdx != -1) return 'Red ${redIdx + 1}';
@@ -170,9 +170,9 @@ class MatchEvent {
     );
   }
 
-  /// True only after the END DATE has fully finished. TBA gives end_date as
-  /// midnight at the start of the last day, so comparing against it directly
-  /// marked the event "over" for the whole final day (quals + playoffs).
+
+
+
   bool get isOver {
     final end = endDate;
     if (end == null) return false;

@@ -2,8 +2,8 @@ name: Match push check
 
 on:
   schedule:
-    # every 3 minutes. GitHub's scheduler is best-effort, so treat this as
-    # "roughly every few minutes," not exact.
+
+
     - cron: '*/3 * * * *'
   workflow_dispatch: {}
 

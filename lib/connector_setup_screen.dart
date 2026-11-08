@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Private names so these never clash with the colors in battery_screen.dart.
+
 const _kYellow = Color(0xFFFFC107);
 const _kYellowLight = Color(0xFFFFF4E5);
 const _kYellowDark = Color(0xFFB38600);
@@ -14,9 +14,9 @@ const _kGray = Color(0xFFAAAAAA);
 
 const String _kBase = 'https://ridgeboticsapp.onrender.com';
 
-/// EDIT THIS: where people download the Marble Collector installer.
-/// Leave it empty and the slide tells them to ask their team's programming
-/// lead instead.
+
+
+
 const String kConnectorDownloadUrl = '';
 
 class _Slide {
@@ -33,11 +33,11 @@ class _Slide {
   });
 }
 
-/// The directions for Marble Connector Desktop (automatic mode), as slides.
-///
-/// Opened from the battery screen. Pops `true` when the person reaches the end
-/// and taps Done/Close, and `false` if they back out early. When
-/// [instructionsOnly] is true it is just a reminder, with a Close button.
+
+
+
+
+
 class ConnectorSetupScreen extends StatefulWidget {
   final bool instructionsOnly;
 
@@ -86,8 +86,8 @@ class _ConnectorSetupScreenState extends State<ConnectorSetupScreen> {
     } catch (_) {}
   }
 
-  // Asks Marble whether the desktop app has checked in recently, so the person
-  // can watch the dot turn green while they sign in on the computer.
+
+
   Future<void> _check() async {
     final team = _team;
     final pass = _passcode;
@@ -105,7 +105,7 @@ class _ConnectorSetupScreenState extends State<ConnectorSetupScreen> {
       final ok = data['connectorConnected'] == true;
       if (ok != _connected) setState(() => _connected = ok);
     } catch (_) {
-      // Offline or Marble waking up: just try again on the next tick.
+
     }
   }
 

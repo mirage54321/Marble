@@ -14,7 +14,7 @@ const FIRST_USERNAME = process.env.FIRST_USERNAME;
 const FIRST_TOKEN = process.env.FIRST_TOKEN;
 const crypto = require('crypto');
 const app = express();
-app.set('trust proxy', 1); // Render sits in front: req.ip must be the real client for rate limiting
+app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -72,8 +72,8 @@ function sleep(ms) {
 }
 
 function isRetryableGeminiStatus(status) {
-  // 429 = rate limited 
-  // 503 = model temporarily overloaded.
+
+
   return status === 429 || status === 503;
 }
 
@@ -83,7 +83,7 @@ function retryDelayMsFromResponse(response, attempt) {
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed * 1000;
   }
-  return GEMINI_BASE_DELAY_MS * Math.pow(2, attempt); 
+  return GEMINI_BASE_DELAY_MS * Math.pow(2, attempt);
 }
 
 async function callGeminiWithRetry(url, body, maxRetries = GEMINI_MAX_RETRIES) {
@@ -370,23 +370,23 @@ async function sendPushBurst(sub, basePayload, tagSeed) {
     ...(isIos ? {} : { vibrate: PUSH_VIBRATE_PATTERN }),
   });
 
-  // if (!isIos) {
+
     return sendSingleNotification(sub, payload);
-  // }
 
-  // let deliveredAtLeastOnce = false;
-  // for (let i = 0; i < PUSH_BURST_COUNT; i++) {
-  //   const delivered = await sendSingleNotification(sub, payload);
-  //   if (!delivered) {
 
-  //     break;
-  //   }
-  //   deliveredAtLeastOnce = true;
-  //   if (i < PUSH_BURST_COUNT - 1) {
-  //     await sleep(PUSH_BURST_INTERVAL_MS);
-  //   }
-  // }
-  // return deliveredAtLeastOnce;
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 if (!MONGODB_URI) {
@@ -442,7 +442,7 @@ async function connectToMongo() {
   await batteryTelemetryCollection.createIndex({ teamNumber: 1, logId: 1 }, { sparse: true });
   await batteryReadingsCollection.createIndex({ teamNumber: 1, readingId: 1 }, { unique: true });
   await batteryReadingsCollection.createIndex({ teamNumber: 1, competitionId: 1, at: -1 });
-  await batteryReadingsCollection.createIndex({ createdAt: 1 }, { expireAfterSeconds: 60 * 24 * 60 * 60 }); // keep 60 days
+  await batteryReadingsCollection.createIndex({ createdAt: 1 }, { expireAfterSeconds: 60 * 24 * 60 * 60 });
   await pushSubscriptionsCollection.createIndex({ endpoint: 1 }, { unique: true });
   await pushSubscriptionsCollection.createIndex({ teamNumber: 1, eventKey: 1 });
   await notifiedMatchesCollection.createIndex(
@@ -461,8 +461,8 @@ async function connectToMongo() {
   await worldRatingsCollection.createIndex({ refreshedAt: -1 });
   await eventTeamsCollection.createIndex({ refreshedAt: -1 });
 
-  // Before the mode lived on the server it was only saved on each phone. Teams
-  // that already import robot logs keep working; everyone else starts manual.
+
+
   const logTeams = await batteryTelemetryCollection.distinct('teamNumber', { source: 'wpilog' });
   if (logTeams.length) {
     await teamsCollection.updateMany(
@@ -567,15 +567,15 @@ async function getTeam(teamNumber) {
   return teamsCollection.findOne({ teamNumber: cleanedTeamNumber });
 }
 
-// ---------- passcodes ----------
-// Stored as a salted scrypt hash. Older teams still have a plain-text
-// "passcode" field: it keeps working and is replaced by a hash on the first
-// successful login. The passcode can come from the body, the query string
-// (older app versions) or the X-Team-Passcode header (headers don't end up in
-// URL logs, so new clients use that).
+
+
+
+
+
+
 const scrypt = require('util').promisify(crypto.scrypt);
-const VERIFY_KEY = crypto.randomBytes(32); // per process: only used for the cache below
-const verifiedCache = new Map(); // teamNumber -> digest of the last passcode that passed
+const VERIFY_KEY = crypto.randomBytes(32);
+const verifiedCache = new Map();
 
 async function hashPasscode(passcode) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -589,9 +589,9 @@ function safeEqual(a, b) {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
 
-// Phones poll every few seconds. scrypt is deliberately slow, so a passcode
-// that already passed is remembered (as a keyed digest, never the passcode).
-// The digest includes the stored hash, so changing the passcode invalidates it.
+
+
+
 function verifyDigest(team, passcode) {
   return crypto.createHmac('sha256', VERIFY_KEY)
     .update(`${team.teamNumber}\n${team.passcodeHash || team.passcode || ''}\n${passcode}`)
@@ -611,7 +611,7 @@ async function passcodeMatches(team, passcode) {
   } else if (typeof team.passcode === 'string') {
     ok = safeEqual(team.passcode, passcode);
     if (ok) {
-      // Upgrade the stored plain-text passcode to a hash.
+
       const passcodeHash = await hashPasscode(passcode);
       await teamsCollection.updateOne(
         { teamNumber: team.teamNumber, passcode: team.passcode },
@@ -633,12 +633,12 @@ function readPasscode(req) {
   );
 }
 
-// Wrong-passcode attempts are counted per client+team and per client. Past the
-// limit the answer is 429 for a while, even if the next guess is right.
+
+
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_LIMIT_PER_TEAM = 10;
 const AUTH_LIMIT_PER_IP = 60;
-const authFailures = new Map(); // key -> { count, since }
+const authFailures = new Map();
 
 function failureCount(key) {
   const entry = authFailures.get(key);
@@ -668,7 +668,7 @@ function clearAuthFailures(req, teamNumber) {
 }
 
 setInterval(() => {
-  for (const key of authFailures.keys()) failureCount(key); // drops expired entries
+  for (const key of authFailures.keys()) failureCount(key);
 }, 10 * 60 * 1000).unref();
 
 function sendRateLimited(res) {
@@ -678,8 +678,8 @@ function sendRateLimited(res) {
   });
 }
 
-// Shared by checkTeamAuth and the battery list route. Returns true when the
-// passcode is right; otherwise it has already answered (401 or 429).
+
+
 async function authenticate(req, res, team, teamNumber, passcode) {
   if (authIsBlocked(req, teamNumber)) {
     sendRateLimited(res);
@@ -765,8 +765,8 @@ function batteryFlagScore(battery, now = Date.now()) {
   }, 0);
 }
 
-// Conservative screening only: match load, robot wiring, and missing current
-// data can affect one log. This produces warnings, never an automatic retirement.
+
+
 function summarizeBatteryTelemetry(records) {
   const newestFirst = [...records].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -829,15 +829,19 @@ function healthPenalty(health) {
   return 0;
 }
 
-// Lower rank = better to grab. 'low' (flat or under load) is never recommended while
-// anything else is available.
+
+
 const STATE_RANK = { charged_ready: 0, available: 0, partial: 1, recently_used: 1, charging: 1 };
 const NODE_FRESH_MS = 5 * 60 * 1000;
 
-// Teams in Connector mode never press Use / Charge, so Marble has no "in use" or
-// "charged" flags for them. Work it out from what Marble does see: the battery node's
-// latest voltage, and when the last robot log for the battery came in.
-function autoBatteryState(battery, lastLogMs, now) {
+
+
+
+
+
+
+
+function autoBatteryState(battery, lastLogMs, now, hasLogs = false) {
   const seen = battery.lastVoltageAt ? new Date(battery.lastVoltageAt).getTime() : 0;
   const volts = Number.isFinite(battery.lastVoltage) ? battery.lastVoltage : null;
   if (volts !== null && now - seen < NODE_FRESH_MS) {
@@ -848,17 +852,20 @@ function autoBatteryState(battery, lastLogMs, now) {
   if (lastLogMs && now - lastLogMs < BATTERY_COOLDOWN_MINUTES * 60000) {
     return { state: 'recently_used', minutesAgo: Math.max(1, Math.round((now - lastLogMs) / 60000)) };
   }
+  if (volts === null && !hasLogs && !lastLogMs) return { state: 'no_data' };
   return { state: 'available' };
 }
 
-// ctx = { auto: boolean, lastLogMs: Map(label -> ms of the newest robot log) }
+
+
 function stateFor(battery, now, ctx) {
   return ctx && ctx.auto
-    ? autoBatteryState(battery, ctx.lastLogMs.get(battery.label) || 0, now)
+    ? autoBatteryState(battery, ctx.lastLogMs.get(battery.label) || 0, now,
+      !!(ctx.logged && ctx.logged.has(battery.label)))
     : getBatteryState(battery, now);
 }
 
-// Newest of "someone pressed Use" and "a robot log arrived", so rotation works in both modes.
+
 function lastUsedMsFor(battery, ctx) {
   const own = new Date(battery.lastUsedAt).getTime() || 0;
   return Math.max(own, (ctx && ctx.lastLogMs && ctx.lastLogMs.get(battery.label)) || 0);
@@ -897,7 +904,7 @@ function fallbackRecommendation(batteries, reason, healthByLabel = new Map(), ct
       const flags = batteryFlagScore(a.battery, now) - batteryFlagScore(b.battery, now);
       if (flags !== 0) return flags;
       if (a.info.state === 'charging' && b.info.state === 'charging') return a.info.chargeLeft - b.info.chargeLeft;
-      // Equal otherwise: the one rested longest, so use spreads out evenly.
+
       const rest = lastUsedMsFor(a.battery, ctx) - lastUsedMsFor(b.battery, ctx);
       if (rest !== 0) return rest;
       return String(a.battery.label).localeCompare(String(b.battery.label), undefined, { numeric: true });
@@ -908,18 +915,24 @@ function fallbackRecommendation(batteries, reason, healthByLabel = new Map(), ct
     };
   }
 
-  // Nothing is ready. Point at the one that gets ready soonest.
+
   const waiting = batteries
     .map((battery) => ({ battery, info: stateFor(battery, now, ctx) }))
-    .filter(({ info }) => info.state !== 'in_use');
+    .filter(({ info }) => info.state !== 'in_use' && info.state !== 'no_data');
   const wait = ({ info }) => {
-    if (info.state === 'low') return -(info.volts || 0);           // fullest of the flat ones
-    if (info.state === 'dead_needs_charge') return 0;              // can go on the charger now
+    if (info.state === 'low') return -(info.volts || 0);
+    if (info.state === 'dead_needs_charge') return 0;
     if (info.state === 'dead_cooling_down') return info.cooldownLeft;
     return 1000;
   };
   waiting.sort((a, b) => wait(a) - wait(b));
   const pick = waiting[0];
+  if (!pick && ctx && ctx.auto && batteries.some((b) => stateFor(b, now, ctx).state === 'no_data')) {
+    return {
+      recommendedLabel: null,
+      reason: 'No battery data yet. Put a sensor node on a battery or log a match.',
+    };
+  }
   return {
     recommendedLabel: pick ? pick.battery.label : null,
     reason: batteries.length
@@ -1150,12 +1163,12 @@ app.get('/reports/summary', async (req, res) => {
   }
 });
 
-// ---------- Marble Connector Desktop (automatic mode) ----------
-// A team is either "manual" (people tap Use / Charge) or "auto" (Marble Connector
-// Desktop reads robot logs and the phone just shows the result). The mode is
-// stored on the team, so every phone and the desktop app agree on it, and the
-// desktop app is only allowed to connect while the team is in auto mode.
-const CONNECTOR_ONLINE_MS = 60 * 1000; // the desktop app checks in about every 15 s
+
+
+
+
+
+const CONNECTOR_ONLINE_MS = 60 * 1000;
 
 function teamMode(team) {
   return team && team.batteryMode === 'auto' ? 'auto' : 'manual';
@@ -1208,7 +1221,7 @@ app.post('/battery/mode', async (req, res) => {
     }
 
     const update = { batteryMode: mode, batteryModeSetAt: new Date().toISOString() };
-    // Whatever connected before no longer counts: it has to connect again.
+
     const unset = { connectorLastSeenAt: '' };
     await teamsCollection.updateOne(
       { teamNumber: team.teamNumber },
@@ -1221,7 +1234,7 @@ app.post('/battery/mode', async (req, res) => {
   }
 });
 
-// The desktop app calls this when someone signs out of it.
+
 app.post('/battery/connector/disconnect', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
@@ -1400,8 +1413,8 @@ app.post('/battery/add', async (req, res) => {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
 
-    // Next number after the highest one in use. Counting batteries instead
-    // would reuse a number after a delete (delete B2 of 3, then "B3" exists).
+
+
     const existing = await batteriesCollection
       .find({ teamNumber: team.teamNumber }, { projection: { label: 1 } })
       .toArray();
@@ -1425,7 +1438,7 @@ app.post('/battery/add', async (req, res) => {
         await batteriesCollection.insertOne(battery);
         break;
       } catch (err) {
-        // Two phones adding at once can pick the same number: try the next one.
+
         if (err.code !== 11000 || attempt === 4) throw err;
       }
     }
@@ -1570,16 +1583,16 @@ app.post('/battery/telemetry', async (req, res) => {
     const team = await checkTeamAuth(req, res);
     if (!team) return;
 
-    // Uploads from robot logs come from Marble Connector Desktop, which is only
-    // allowed on teams that switched to it. Manual entries from the app are fine.
+
+
     if (req.body.source === 'wpilog') {
       if (!requireAutoMode(team, res)) return;
       await touchConnector(team);
     }
 
-    // The desktop app says which competition a log was collected for. If the
-    // team has started a new one since (New comp / start fresh), the old log
-    // must not land in it.
+
+
+
     const sentCompetition = cleanString(req.body.competitionId);
     if (sentCompetition && sentCompetition !== (team.batteryCompetitionId || 'legacy')) {
       return res.status(410).json({
@@ -1610,8 +1623,8 @@ app.post('/battery/telemetry', async (req, res) => {
       return res.status(400).json({ error: 'At least one metric is required' });
     }
 
-    // A collector upload includes a hash of the source WPILOG. Keep imports
-    // idempotent even if the collector's local state is lost.
+
+
     const fromLog = req.body.source === 'wpilog';
     const logId = fromLog ? cleanString(req.body.logId) : '';
     if (fromLog && !logId) {
@@ -1648,15 +1661,15 @@ app.post('/battery/telemetry', async (req, res) => {
   }
 });
 
-// ---- Live voltage readings from the Raspberry Pi battery listener ----
-// Separate from match-log telemetry on purpose: these are a time series for
-// graphs, and must never count as a "match" in the battery reports.
-const READING_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // a Pi that was offline can catch up
+
+
+
+const READING_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const READING_FUTURE_SLACK_MS = 5 * 60 * 1000;
 const GRAPH_MAX_POINTS = 600;
 
-// Keeps the lowest and highest reading of each time bucket, so a short dip
-// still shows on a zoomed-out graph.
+
+
 function downsampleReadings(points, maxPoints) {
   if (points.length <= maxPoints) return points;
   const buckets = Math.floor(maxPoints / 2);
@@ -1676,13 +1689,13 @@ function downsampleReadings(points, maxPoints) {
   return out;
 }
 
-// ---- Which battery is each sensor node on? ----
-// A node (B1, B2, ...) is matched to a battery in this order:
-//   1) what the team picked in the app (team.batteryNodeMap; null = deliberately none)
-//   2) the label the Pi sent along (from its marble.json)
-//   3) the battery whose label has the same number (node 3 -> B3)
-// Every node that reports is remembered in team.batteryNodes, so the apps can list the
-// active nodes and let people change which battery each one is on.
+
+
+
+
+
+
+
 const NODE_ID_RE = /^[A-Za-z0-9_-]{1,20}$/;
 
 function numberIn(text) {
@@ -1753,7 +1766,7 @@ app.post('/battery/reading', async (req, res) => {
     const rounded = Math.round(volts * 1000) / 1000;
     const atIso = at.toISOString();
 
-    // Which battery is this node on?
+
     let source = 'pi';
     const map = team.batteryNodeMap || {};
     if (validNode && Object.prototype.hasOwnProperty.call(map, nodeId)) {
@@ -1766,7 +1779,7 @@ app.post('/battery/reading', async (req, res) => {
     const exists = label && batteries.some((b) => b.label === label);
     if (label && !exists && source === 'pi') return res.status(404).json({ error: 'Battery not found' });
 
-    // Remember the node (even with no battery) so the apps can offer it for assignment.
+
     if (validNode) {
       const prev = team.batteryNodes && team.batteryNodes[nodeId];
       if (!prev || !prev.at || prev.at < atIso) {
@@ -1794,8 +1807,8 @@ app.post('/battery/reading', async (req, res) => {
       throw err;
     }
 
-    // "Added to the battery": the newest reading also lives on the battery itself.
-    // Only moves forward, so a Pi catching up on old readings can't overwrite it.
+
+
     await batteriesCollection.updateOne(
       {
         teamNumber: team.teamNumber,
@@ -1811,7 +1824,7 @@ app.post('/battery/reading', async (req, res) => {
   }
 });
 
-// The sensor nodes that have reported, which battery each is on, and the batteries to pick from.
+
 app.get('/battery/nodes', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
@@ -1824,8 +1837,8 @@ app.get('/battery/nodes', async (req, res) => {
   }
 });
 
-// Put a node on a different battery. If another node already has that battery the two
-// swap, so no battery ends up with two nodes. label null/'' = no battery.
+
+
 app.post('/battery/nodes/assign', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
@@ -1854,8 +1867,8 @@ app.post('/battery/nodes/assign', async (req, res) => {
     await teamsCollection.updateOne({ teamNumber: team.teamNumber }, { $set: { batteryNodeMap: map } });
     team.batteryNodeMap = map;
 
-    // Make the icons follow right away: batteries that lost their node stop showing a
-    // reading, and batteries that gained one show that node's newest reading.
+
+
     const after = {};
     for (const id of Object.keys(seen)) after[id] = effectiveNodeLabel(team, id, batteries);
     const nowOn = new Set(Object.values(after).filter(Boolean));
@@ -1901,7 +1914,7 @@ app.get('/battery/readings', async (req, res) => {
       .sort({ at: -1 })
       .limit(50000)
       .toArray();
-    rows.reverse(); // oldest first
+    rows.reverse();
 
     const byLabel = {};
     for (const r of rows) (byLabel[r.label] ||= []).push([r.at.getTime(), r.volts]);
@@ -1950,8 +1963,8 @@ app.post('/battery/rename', async (req, res) => {
     const label = cleanString(req.body.label);
     if (!label) return res.status(400).json({ error: 'label is required' });
 
-    // The label (B1, B2...) stays the permanent ID everywhere. This is only a
-    // display nickname. An empty name clears it and goes back to the label.
+
+
     const name = (cleanString(req.body.name) || '').slice(0, 10).trim();
 
     const battery = await batteriesCollection.findOne({ teamNumber: team.teamNumber, label });
@@ -2028,8 +2041,8 @@ app.delete('/battery/:label', async (req, res) => {
       label: req.params.label,
     });
     if (result.deletedCount > 0) {
-      // Otherwise its robot-log history would show up under the next battery
-      // that gets this label.
+
+
       await batteryTelemetryCollection.deleteMany({
         teamNumber: team.teamNumber,
         competitionId: team.batteryCompetitionId || 'legacy',
@@ -2049,8 +2062,8 @@ app.delete('/battery/:label', async (req, res) => {
   }
 });
 
-// Keeps the battery but wipes what was recorded for it: robot-log history and
-// voltage readings (and the "last reading" shown on its icon).
+
+
 app.delete('/battery/:label/data', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
@@ -2107,14 +2120,15 @@ app.post('/battery/recommend', async (req, res) => {
       summarizeBatteryTelemetry(recordsByLabel.get(battery.label) || []),
     ]));
 
-    // Connector teams have no Use / Charge buttons, so learn when each battery last ran
-    // from its newest robot log.
+
+
     const lastLogMs = new Map();
     for (const record of telemetry) {
       const t = new Date(record.enabledStartAt || record.createdAt).getTime();
       if (Number.isFinite(t) && t > (lastLogMs.get(record.label) || 0)) lastLogMs.set(record.label, t);
     }
-    const ctx = { auto: teamMode(team) === 'auto', lastLogMs };
+    const logged = new Set(telemetry.map((record) => record.label));
+    const ctx = { auto: teamMode(team) === 'auto', lastLogMs, logged };
 
     const now = Date.now();
     const candidates = recommendableBatteries(batteries, now, ctx);
@@ -2124,9 +2138,10 @@ app.post('/battery/recommend', async (req, res) => {
     }
 
     if (candidates.length === 1) {
+      const othersHaveNoData = ctx.auto && batteries.some((b) => stateFor(b, now, ctx).state === 'no_data');
       return res.json({
         recommendedLabel: candidates[0].battery.label,
-        reason: 'Only battery that is ready to use',
+        reason: othersHaveNoData ? 'Only battery with data that is ready' : 'Only battery that is ready to use',
       });
     }
 
@@ -2205,8 +2220,8 @@ app.post('/battery/recommend', async (req, res) => {
     try {
       const parsed = JSON.parse(rawText);
       const picked = candidates.find(({ battery }) => battery.label === parsed.recommendedLabel);
-      // Don't trust the model over the rules: it must not pick something worse than what
-      // is plainly on offer (a charging battery while a ready one exists, or a flagged-bad one).
+
+
       const bestRank = Math.min(...candidates.map((c) => STATE_RANK[c.info.state]));
       const bestHealth = Math.min(...candidates
         .filter((c) => STATE_RANK[c.info.state] === bestRank)

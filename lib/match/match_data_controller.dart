@@ -98,7 +98,7 @@ class MatchDataController extends ChangeNotifier {
 
   bool isLoading = true;
 
- 
+
   static const String _fakeTeamNumber = '-4388';
   static const String _fakeEventKey = 'faketest2026';
 
@@ -143,9 +143,9 @@ class MatchDataController extends ChangeNotifier {
   Timer? _pollTimer;
   bool _polling = false;
 
-  /// TBA publishes new predicted times / scores constantly during an event, but
-  /// the app only ever fetched once. Poll quietly (no spinner) so the countdown
-  /// follows the real schedule when matches run early or late.
+
+
+
   void startPolling() {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 45), (_) => pollSilently());
@@ -155,7 +155,7 @@ class MatchDataController extends ChangeNotifier {
     final t = myTeam;
     if (t == null || t.selectedEventKey == null || _polling) return;
     final event = t.selectedEvent;
-    // Only poll while an event is actually happening.
+
     if (event != null && !event.isLiveNow) return;
     _polling = true;
     try {
@@ -180,7 +180,7 @@ class MatchDataController extends ChangeNotifier {
       t.myStatus = TeamStatus.fromJson(data['status'] as Map<String, dynamic>?);
       notifyListeners();
     } catch (_) {
-      // Keep showing the last good data.
+
     } finally {
       _polling = false;
     }
@@ -732,7 +732,7 @@ class MatchDataController extends ChangeNotifier {
     return _eventTeamsFutures.putIfAbsent(eventKey, () async {
       try {
         final uri = Uri.parse('$backendBase/event/teams?eventKey=$eventKey');
-        
+
         final res = await http
             .get(uri)
             .timeout(const Duration(seconds: 15))
@@ -874,7 +874,7 @@ class MatchDataController extends ChangeNotifier {
     }();
   }
 
-  // The Accuracy tab is only offered when signed in as the test team.
+
   bool get canSeeAccuracy => myTeam?.teamNumber == _fakeTeamNumber;
 
   Future<ModelAccuracy> loadModelAccuracy() async {

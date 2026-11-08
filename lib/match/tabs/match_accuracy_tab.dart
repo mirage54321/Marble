@@ -5,8 +5,8 @@ import '../match_models.dart';
 import '../match_scope.dart';
 import '../match_theme.dart';
 
-/// Only shown in the bottom nav when signed in as the test team (see
-/// MatchDataController.canSeeAccuracy).
+
+
 class MatchAccuracyTab extends StatefulWidget {
   const MatchAccuracyTab({super.key});
 
