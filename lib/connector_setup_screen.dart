@@ -54,9 +54,6 @@ class _ConnectorSetupScreenState extends State<ConnectorSetupScreen> {
   String? _team;
   String? _passcode;
   bool _connected = false;
-  bool _collectorUnlocked = false;
-  bool _checkingCollectorPassword = false;
-  String? _collectorPasswordError;
   Timer? _poll;
 
   @override
@@ -167,134 +164,28 @@ class _ConnectorSetupScreenState extends State<ConnectorSetupScreen> {
 
   void _finish() => Navigator.pop(context, true);
 
-  Future<void> _unlockCollector(String password) async {
-    setState(() {
-      _checkingCollectorPassword = true;
-      _collectorPasswordError = null;
-    });
-    try {
-      final response = await http.post(
-        Uri.parse('$_kBase/collector/access'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'password': password}),
-      ).timeout(const Duration(seconds: 15));
-      if (!mounted) return;
-      if (response.statusCode == 200) {
-        setState(() => _collectorUnlocked = true);
-        return;
-      }
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      setState(() => _collectorPasswordError =
-          body['error'] as String? ?? 'Incorrect passcode');
-    } catch (_) {
-      if (mounted) {
-        setState(() => _collectorPasswordError =
-            'Could not reach Marble. Try again.');
-      }
-    } finally {
-      if (mounted) setState(() => _checkingCollectorPassword = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (!_collectorUnlocked) return _collectorGate();
+    final slides = _slides();
+    final last = _page == slides.length - 1;
+
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 255, 255, 248),
       body: SafeArea(
         child: Column(children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 6, 16, 0),
-            child: Row(children: [
-              IconButton(
-                tooltip: 'Close',
-                icon: const Icon(Icons.close, color: _kYellowDark),
-                onPressed: () => Navigator.pop(context, true),
-              ),
-              const Expanded(
-                child: Text('Marble Collector',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-              ),
-            ]),
-          ),
-          const Expanded(
-            child: Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text('Collector access confirmed.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16)),
-              ),
+          _topBar(slides.length),
+          Expanded(
+            child: PageView.builder(
+              controller: _controller,
+              itemCount: slides.length,
+              onPageChanged: (i) => setState(() => _page = i),
+              itemBuilder: (_, i) => _slidePage(slides[i]),
             ),
           ),
+          _statusRow(),
+          _dots(slides.length),
+          _buttons(last),
         ]),
-      ),
-    );
-  }
-
-  Widget _collectorGate() {
-    final password = TextEditingController();
-    return Scaffold(
-      backgroundColor: const Color.fromARGB(255, 255, 255, 248),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            IconButton(
-              tooltip: 'Close',
-              icon: const Icon(Icons.close, color: _kYellowDark),
-              onPressed: () => Navigator.pop(context, false),
-            ),
-            const SizedBox(height: 32),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: _kYellowLight,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(Icons.lock_outline, color: _kYellowDark, size: 28),
-            ),
-            const SizedBox(height: 16),
-            const Text('Marble Collector',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 10),
-            Text(
-              'This the Marble Collector is going to do_. The collector is still in alpha. Enter passcode to continue.',
-              style: TextStyle(fontSize: 15, height: 1.4, color: Colors.grey[800]),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: password,
-              autofocus: true,
-              obscureText: true,
-              onSubmitted: _checkingCollectorPassword ? null : _unlockCollector,
-              decoration: InputDecoration(
-                labelText: 'Passcode',
-                errorText: _collectorPasswordError,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: _kYellow),
-                onPressed: _checkingCollectorPassword
-                    ? null
-                    : () => _unlockCollector(password.text.trim()),
-                child: _checkingCollectorPassword
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text('Continue'),
-              ),
-            ),
-          ]),
-        ),
       ),
     );
   }

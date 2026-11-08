@@ -29,7 +29,6 @@ if (GEMINI_SEGMENT_API_KEYS.length === 0 && GEMINI_API_KEY) {
 }
 const DB_NAME = process.env.DB_NAME || 'ridgebotics';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
-const COLLECTOR_PASSWORD = process.env.COLLECTOR_PASSWORD;
 
 const GEMINI_SCAN_MODELS = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-3.5-flash'];
 function geminiModelUrl(model) {
@@ -1221,7 +1220,6 @@ app.post('/battery/mode', async (req, res) => {
       return res.status(400).json({ error: "mode must be 'auto' or 'manual'" });
     }
 
-    const previousMode = teamMode(team);
     const update = { batteryMode: mode, batteryModeSetAt: new Date().toISOString() };
 
     const unset = { connectorLastSeenAt: '' };
@@ -1229,41 +1227,11 @@ app.post('/battery/mode', async (req, res) => {
       { teamNumber: team.teamNumber },
       { $set: update, $unset: unset },
     );
-    if (previousMode !== mode) {
-      const scope = { teamNumber: team.teamNumber };
-      await Promise.all([
-        batteriesCollection.updateMany(scope, {
-          $set: {
-            isCharging: false,
-            isInUse: false,
-            chargedAt: null,
-            lastUsedAt: new Date(0).toISOString(),
-            flags: [],
-          },
-          $unset: { lastVoltage: '', lastVoltageAt: '' },
-        }),
-        batteryTelemetryCollection.deleteMany(scope),
-        batteryReadingsCollection.deleteMany(scope),
-      ]);
-    }
     res.json({ ok: true, mode });
   } catch (err) {
     console.error('Battery mode error:', err);
     res.status(500).json({ error: err.message });
   }
-});
-
-app.post('/collector/access', (req, res) => {
-  if (!COLLECTOR_PASSWORD) {
-    return res.status(503).json({ error: 'Collector access is not configured yet' });
-  }
-  const supplied = cleanString(req.body.password);
-  const expected = Buffer.from(COLLECTOR_PASSWORD);
-  const received = Buffer.from(supplied);
-  const valid = expected.length === received.length &&
-      crypto.timingSafeEqual(expected, received);
-  if (!valid) return res.status(401).json({ error: 'Incorrect passcode' });
-  return res.json({ ok: true });
 });
 
 
@@ -2114,16 +2082,7 @@ app.delete('/battery/:label/data', async (req, res) => {
     const readings = await batteryReadingsCollection.deleteMany(scope);
     await batteriesCollection.updateOne(
       { teamNumber: team.teamNumber, label },
-      {
-        $set: {
-          isCharging: false,
-          isInUse: false,
-          chargedAt: null,
-          lastUsedAt: new Date(0).toISOString(),
-          flags: [],
-        },
-        $unset: { lastVoltage: '', lastVoltageAt: '' },
-      },
+      { $unset: { lastVoltage: '', lastVoltageAt: '' } },
     );
     res.json({ ok: true, deletedLogs: telemetry.deletedCount, deletedReadings: readings.deletedCount });
   } catch (err) {

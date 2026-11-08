@@ -1374,11 +1374,6 @@ class _BatteryScreenState extends State<BatteryScreen>
       if (dataOnly) {
         battery.lastVoltage = null;
         battery.lastVoltageAt = null;
-        battery.chargedAt = null;
-        battery.lastUsedAt = DateTime.fromMillisecondsSinceEpoch(0);
-        battery.isCharging = false;
-        battery.isInUse = false;
-        battery.flags.clear();
       } else {
         _batteries = _batteries.where((x) => x.label != battery.label).toList();
       }
@@ -1390,84 +1385,6 @@ class _BatteryScreenState extends State<BatteryScreen>
     await _savePending();
     unawaited(_loadBatteries(silent: true));
     return true;
-  }
-
-  Future<void> _showBatteryMenu(Battery battery) async {
-    if (_isGuest) return;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            _batteryMenuTile(ctx, Icons.edit_outlined, 'Rename battery', 'rename'),
-            _batteryMenuTile(ctx, Icons.delete_outline, 'Delete data', 'data', color: redChar),
-            _batteryMenuTile(ctx, Icons.delete_forever_outlined, 'Delete battery', 'battery', color: redChar),
-            _batteryMenuTile(ctx, Icons.flag_outlined, 'Add flag', 'flag'),
-            const Divider(height: 8),
-            _batteryMenuTile(ctx, null, 'Cancel', null, color: Colors.grey[600]),
-          ]),
-        ),
-      ),
-    );
-    if (action == 'rename') {
-      await _renameBattery(battery);
-    } else if (action == 'flag') {
-      await _flagWeak(battery);
-    } else if (action == 'data') {
-      final approved = await _confirmDeleteAction(
-        'Delete data for ${battery.displayName}?',
-        'This keeps the battery but clears its charge/use state, flags, robot logs, and voltage readings. This can\'t be undone.',
-        'Delete data',
-      );
-      if (approved) await _deleteBattery(battery, dataOnly: true);
-    } else if (action == 'battery') {
-      final approved = await _confirmDeleteAction(
-        'Delete ${battery.displayName}?',
-        'This deletes the battery and everything recorded for it. This can\'t be undone.',
-        'Delete battery',
-      );
-      if (approved) await _deleteBattery(battery, dataOnly: false);
-    }
-  }
-
-  Widget _batteryMenuTile(BuildContext context, IconData? icon, String label,
-      String? value, {Color? color}) {
-    final c = color ?? Colors.black87;
-    return TapCursor(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => Navigator.pop(context, value),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 13),
-        child: Row(children: [
-          SizedBox(width: 22, child: icon == null ? null : Icon(icon, size: 20, color: c)),
-          const SizedBox(width: 14),
-          Text(label, style: TextStyle(fontSize: 15, color: c)),
-        ]),
-      ),
-    );
-  }
-
-  Future<bool> _confirmDeleteAction(String title, String message, String confirm) async {
-    return await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text(title),
-            content: Text(message),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: redChar),
-                onPressed: () => Navigator.pop(ctx, true),
-                child: Text(confirm),
-              ),
-            ],
-          ),
-        ) ??
-        false;
   }
 
   Future<void> _addBattery() async {
@@ -2020,6 +1937,9 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Widget _list() {
+    // The node grid is designed for Marble Connector Desktop teams. Manual
+    // teams keep the hand-operated tracker: its full status rows and Use /
+    // Charge buttons make a busy competition pit much quicker to work in.
     return _teamAuto ? _automaticList() : _manualList();
   }
 
@@ -2031,9 +1951,9 @@ class _BatteryScreenState extends State<BatteryScreen>
       const SizedBox(height: 16),
       _grid(),
       const SizedBox(height: 18),
-      if (!_isGuest) _addButton(),
-      if (!_isGuest) const SizedBox(height: 14),
       _legend(),
+      const SizedBox(height: 14),
+      if (!_isGuest) _addButton(),
       const SizedBox(height: 16),
     ]);
   }
@@ -2174,7 +2094,7 @@ class _BatteryScreenState extends State<BatteryScreen>
           border: Border.all(color: Colors.black.withValues(alpha: 0.07), width: 0.5)),
       child: Row(children: [
         TapCursor(
-          onTap: () => _openDetail(battery),
+          onTap: _isGuest ? () => _openDetail(battery) : () => _renameBattery(battery),
           child: Container(
             width: 58, height: 46,
             decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
@@ -2226,14 +2146,6 @@ class _BatteryScreenState extends State<BatteryScreen>
           TapCursor(onTap: () => _flagWeak(battery), child: Padding(
               padding: const EdgeInsets.all(8),
               child: Icon(Icons.flag_outlined, size: 16, color: Colors.grey[500]))),
-          const SizedBox(width: 2),
-          TapCursor(
-            onTap: () => _showBatteryMenu(battery),
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Icon(Icons.settings_outlined, size: 16, color: Colors.grey[500]),
-            ),
-          ),
         ],
       ]),
     );
@@ -2396,14 +2308,6 @@ class _BatteryScreenState extends State<BatteryScreen>
               child: Row(children: [
                 if (tag != null) tag,
                 const Spacer(),
-                if (!_isGuest)
-                  TapCursor(
-                    onTap: () => _showBatteryMenu(b),
-                    child: const Padding(
-                      padding: EdgeInsets.all(3),
-                      child: Icon(Icons.settings_outlined, size: 17, color: YellorDark),
-                    ),
-                  ),
               ]),
             ),
             const SizedBox(height: 4),
