@@ -499,15 +499,24 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            _menuTile(Icons.edit_outlined, 'Rename', () async {
+            _menuTile(Icons.edit_outlined, 'Rename battery', () async {
               Navigator.pop(ctx);
               await widget.onRename(b);
               if (mounted) setState(() {});
             }),
-            _menuTile(Icons.close, 'Delete', () {
+            _menuTile(Icons.delete_outline, 'Delete data', () {
               Navigator.pop(ctx);
-              _confirmDelete(b);
+              _confirmDeleteData(b);
             }, color: redChar),
+            _menuTile(Icons.delete_forever_outlined, 'Delete battery', () {
+              Navigator.pop(ctx);
+              _confirmDeleteBattery(b);
+            }, color: redChar),
+            _menuTile(Icons.flag_outlined, 'Add flag', () async {
+              Navigator.pop(ctx);
+              await widget.onFlag(b);
+              if (mounted) setState(() {});
+            }),
             const Divider(height: 8),
             _menuTile(null, 'Cancel', () => Navigator.pop(ctx),
                 color: Colors.grey[600]),
@@ -533,37 +542,27 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     );
   }
 
-  Future<void> _confirmDelete(Battery b) async {
-    final choice = await showDialog<String>(
+  Future<void> _confirmDeleteData(Battery b) async {
+    final approved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete ${b.displayName}?'),
+        title: Text('Delete data for ${b.displayName}?'),
         content: const Text(
-            'Delete battery removes it and everything recorded for it.\n\n'
-            'Delete its data keeps the battery but clears its robot logs and voltage readings.\n\n'
+            'This keeps the battery but clears its charge/use state, flags, robot logs, and voltage readings.\n\n'
             'This can\'t be undone.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, 'data'),
-              child: const Text('Delete its data')),
           FilledButton(
               style: FilledButton.styleFrom(backgroundColor: redChar),
-              onPressed: () => Navigator.pop(ctx, 'battery'),
-              child: const Text('Delete battery')),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete data')),
         ],
       ),
     );
-    if (choice == null || !mounted) return;
-
-    final dataOnly = choice == 'data';
-    final ok = await widget.onDelete(b, dataOnly: dataOnly);
-    if (!ok || !mounted) return;
-    if (!dataOnly) {
-      Navigator.pop(context);
-      return;
-    }
+    if (approved != true || !mounted) return;
+    final deleted = await widget.onDelete(b, dataOnly: true);
+    if (!deleted || !mounted) return;
     setState(() {
       _readings = null;
       _health = null;
@@ -573,6 +572,27 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     });
     _loadReadings();
     _loadInsights();
+  }
+
+  Future<void> _confirmDeleteBattery(Battery b) async {
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${b.displayName}?'),
+        content: const Text('This deletes the battery and everything recorded for it. This can\'t be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: redChar),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete battery'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    final deleted = await widget.onDelete(b, dataOnly: false);
+    if (deleted && mounted) Navigator.pop(context);
   }
 
 
