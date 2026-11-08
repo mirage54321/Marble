@@ -407,7 +407,7 @@ class _BatteryScreenState extends State<BatteryScreen>
       if (_pending.isNotEmpty && !_isGuest) {
         unawaited(_syncPending());
       }
-      if (!_isGuest && teamNum != null) {
+      if (!_isGuest && _teamAuto && teamNum != null) {
         unawaited(_loadNodes());
 
         if (_autoMode &&
@@ -483,7 +483,7 @@ class _BatteryScreenState extends State<BatteryScreen>
     _autoMode = !guest && _teamAuto;
     await _loadPending();
     await _loadBatteries();
-    unawaited(_loadNodes());
+    if (_teamAuto) unawaited(_loadNodes());
     if (mounted) _startPolling();
 
 
@@ -607,7 +607,10 @@ class _BatteryScreenState extends State<BatteryScreen>
       });
     }
     if (modeChanged) {
-      if (_autoMode && !_isGuest) unawaited(_askAiRecommendation(quiet: true));
+      if (_autoMode && !_isGuest) {
+        unawaited(_loadNodes());
+        unawaited(_askAiRecommendation(quiet: true));
+      }
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
@@ -1765,7 +1768,7 @@ class _BatteryScreenState extends State<BatteryScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 255, 255, 248),
-      floatingActionButton: _isGuest ? null : _nodesButton(),
+      floatingActionButton: _isGuest || !_teamAuto ? null : _nodesButton(),
       body: SafeArea(
         child: Column(children: [
           _topBar(),
@@ -1934,6 +1937,13 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Widget _list() {
+    // The node grid is designed for Marble Connector Desktop teams. Manual
+    // teams keep the hand-operated tracker: its full status rows and Use /
+    // Charge buttons make a busy competition pit much quicker to work in.
+    return _teamAuto ? _automaticList() : _manualList();
+  }
+
+  Widget _automaticList() {
     return ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 96), children: [
       if (_error != null) _offlineBanner(_error!),
       if (_pending.isNotEmpty) _pendingBanner(),
@@ -1946,6 +1956,199 @@ class _BatteryScreenState extends State<BatteryScreen>
       if (!_isGuest) _addButton(),
       const SizedBox(height: 16),
     ]);
+  }
+
+  Widget _manualList() {
+    final recommended = _isGuest ? _localRecommended() : null;
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      if (_error != null) _offlineBanner(_error!),
+      if (_pending.isNotEmpty) _pendingBanner(),
+      if (_isGuest) _manualTopPick(recommended!) else _manualAiHeader(),
+      const SizedBox(height: 16),
+      Row(children: [
+        Expanded(
+          child: Text('All batteries',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.grey[600])),
+        ),
+        if (!_isGuest)
+          Text('tap a name to rename',
+              style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+      ]),
+      const SizedBox(height: 8),
+      ..._batteries.map(_manualBatteryTile),
+      const SizedBox(height: 12),
+      if (!_isGuest) _addButton(),
+      const SizedBox(height: 16),
+    ]);
+  }
+
+  Widget _manualAiHeader() {
+    Battery? picked;
+    if (_recommendedLabel != null) {
+      for (final b in _batteries) {
+        if (b.label == _recommendedLabel) {
+          picked = b;
+          break;
+        }
+      }
+    }
+    final charging = picked != null && picked.isCharging && !picked.isDead;
+
+    Widget content;
+    if (_loadingRecommendation) {
+      content = Row(children: [
+        const SizedBox(width: 18, height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+        const SizedBox(width: 12),
+        Text('Asking AI...', style: TextStyle(fontSize: 15, color: Colors.white.withValues(alpha: 0.9))),
+      ]);
+    } else if (_recommendedLabel != null) {
+      content = Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('AI RECOMMENDS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
+              color: Colors.white.withValues(alpha: 0.8), letterSpacing: 0.5)),
+          const SizedBox(height: 4),
+          Text(picked?.displayName ?? _recommendedLabel!,
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
+          if (picked != null) ...[
+            const SizedBox(height: 3),
+            Text(batteryStatusLabel(picked), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                color: batteryStatusColor(picked))),
+          ],
+          if (_recommendReason != null) ...[
+            const SizedBox(height: 4),
+            Text(_recommendReason!, style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.9))),
+          ],
+          const SizedBox(height: 8),
+          TapCursor(onTap: _askAiRecommendation, child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.refresh, size: 14, color: Colors.white.withValues(alpha: 0.85)),
+            const SizedBox(width: 4),
+            Text('Ask again', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.85))),
+          ])),
+        ])),
+        if (picked != null) Column(children: [
+          TapCursor(onTap: () => _toggleCharging(picked!), child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(color: charging ? greenChar : Colors.white,
+                borderRadius: BorderRadius.circular(12)),
+            child: Text(charging ? 'Charging' : 'Mark charging', style: TextStyle(fontSize: 13,
+                fontWeight: FontWeight.w500, color: charging ? Colors.white : YellorDark)),
+          )),
+          const SizedBox(height: 8),
+          TapCursor(onTap: () => _flagWeak(picked!), child: Text('Flag weak',
+              style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.85)))),
+        ]),
+      ]);
+    } else {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('WHICH BATTERY?', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
+            color: Colors.white.withValues(alpha: 0.8), letterSpacing: 0.5)),
+        const SizedBox(height: 10),
+        TapCursor(onTap: _askAiRecommendation, child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+          child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.auto_awesome, color: YellorDark, size: 18),
+            SizedBox(width: 8),
+            Text('Ask AI which battery to use', style: TextStyle(fontSize: 14,
+                fontWeight: FontWeight.w600, color: YellorDark)),
+          ]),
+        )),
+      ]);
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
+      child: content,
+    );
+  }
+
+  Widget _manualTopPick(Battery battery) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: Yellor, borderRadius: BorderRadius.circular(20)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('RECOMMENDED BATTERY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
+            color: Colors.white.withValues(alpha: 0.8), letterSpacing: 0.5)),
+        const SizedBox(height: 4),
+        Text(battery.displayName,
+            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
+        const SizedBox(height: 3),
+        Text(batteryStatusLabel(battery),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: batteryStatusColor(battery))),
+        const SizedBox(height: 2),
+        Text(_chargedLabel(battery), style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.9))),
+      ]),
+    );
+  }
+
+  Widget _manualBatteryTile(Battery battery) {
+    final statusColor = batteryStatusColor(battery);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.07), width: 0.5)),
+      child: Row(children: [
+        TapCursor(
+          onTap: _isGuest ? () => _openDetail(battery) : () => _renameBattery(battery),
+          child: Container(
+            width: 58, height: 46,
+            decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              FittedBox(fit: BoxFit.scaleDown, child: Text(battery.displayName, maxLines: 1,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white))),
+              if (battery.isInUse)
+                const Text('IN USE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
+            ]),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(batteryStatusLabel(battery),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusColor)),
+          const SizedBox(height: 2),
+          Text(_chargedLabel(battery), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          if (_showFlags && battery.flags.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            TapCursor(onTap: () => _openDetail(battery), child: Text(
+              'flagged ${battery.flags.length}x, tap to view',
+              style: const TextStyle(fontSize: 11, color: redChar),
+            )),
+          ],
+        ])),
+        if (!_isGuest) ...[
+          TapCursor(onTap: () => _toggleCharging(battery), child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+                color: (battery.isCharging && !battery.isDead) ? greenChar
+                    : battery.isCoolingDown ? Colors.blueGrey.withValues(alpha: 0.15) : YellorLight,
+                borderRadius: BorderRadius.circular(10)),
+            child: Text((battery.isCharging && !battery.isDead) ? 'Charging' : 'Charge',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                    color: (battery.isCharging && !battery.isDead) ? Colors.white
+                        : battery.isCoolingDown ? Colors.blueGrey : YellorDark)),
+          )),
+          const SizedBox(width: 6),
+          TapCursor(onTap: () => _toggleInUse(battery), child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(color: battery.isInUse ? redChar : YellorLight,
+                borderRadius: BorderRadius.circular(10)),
+            child: Text(battery.isInUse ? 'In use' : 'Use', style: TextStyle(fontSize: 12,
+                fontWeight: FontWeight.w500, color: battery.isInUse ? Colors.white : YellorDark)),
+          )),
+          const SizedBox(width: 6),
+          TapCursor(onTap: () => _flagWeak(battery), child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(Icons.flag_outlined, size: 16, color: Colors.grey[500]))),
+        ],
+      ]),
+    );
   }
 
 

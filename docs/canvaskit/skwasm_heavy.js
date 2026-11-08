@@ -1,7 +1,7 @@
 
 var skwasm_heavy = (() => {
   var _scriptName = typeof document != 'undefined' ? document.currentScript?.src : undefined;
-
+  
   return (
 function(moduleArg = {}) {
   var moduleRtn;
