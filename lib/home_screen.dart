@@ -16,7 +16,7 @@ const grayConstant = Color.fromARGB(255, 204, 204, 204);
 const orangeConstant = Color.fromARGB(255, 255, 160, 7);
 const pinkConstantLight = Color(0xFFFFE4F0);
 const yellowConstantLight = Color(0xFFFFF4E5);
-const reportEmail = 'maronimira5@gmail.com';
+const reportEmail = 'mimigamin11@gmail.com';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
