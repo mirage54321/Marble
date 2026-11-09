@@ -1031,7 +1031,7 @@ class _BatteryScreenState extends State<BatteryScreen>
               type: MaterialType.transparency,
               child: InkWell(
                 customBorder: const CircleBorder(),
-                onTap: _showNodes,
+                onTap: () => _showNodes(),
                 onLongPress: _peekNodes,
                 child: const Center(
                     child: Icon(Icons.sensors, size: 26, color: _nodeInk)),
@@ -1101,7 +1101,7 @@ class _BatteryScreenState extends State<BatteryScreen>
         children: [
           Text(
               active.isEmpty
-                  ? 'No nodes sending right now'
+                  ? 'No nodes connected'
                   : '${active.length} node${active.length == 1 ? '' : 's'} active',
               style: const TextStyle(
                   fontSize: 14, fontWeight: FontWeight.w700, color: _nodeInk)),
@@ -1119,15 +1119,27 @@ class _BatteryScreenState extends State<BatteryScreen>
               ]),
             ),
           const SizedBox(height: 6),
-          Text('Tap to change which battery a node is on',
+          Text(
+              active.isEmpty
+                  ? 'Click the button for help setting up'
+                  : 'Tap to change which battery a node is on',
               style: TextStyle(fontSize: 13, color: Colors.grey[600])),
         ],
       ),
     );
   }
 
-  void _showNodes() {
-    unawaited(_loadNodes());
+  Future<void> _showNodes() async {
+    if (_nodes.isEmpty) {
+      await _loadNodes().timeout(const Duration(seconds: 2), onTimeout: () {});
+      if (!mounted) return;
+      if (_nodes.isEmpty) {
+        _showNodeSetupHelp();
+        return;
+      }
+    } else {
+      unawaited(_loadNodes());
+    }
     final error = ValueNotifier<String?>(null);
     final busy = ValueNotifier<String?>(null);
     showModalBottomSheet(
@@ -1159,6 +1171,21 @@ class _BatteryScreenState extends State<BatteryScreen>
                         style: TextStyle(fontSize: 13, color: Colors.grey[600])),
                   ),
                 for (final n in _nodes) _nodeRow(n, busy, error),
+                if (!_nodes.any((n) => n.connected))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: TapCursor(
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _showNodeSetupHelp();
+                      },
+                      child: const Text('No nodes connected? See how to set one up',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: YellorDark)),
+                    ),
+                  ),
                 if (error.value != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
@@ -1179,6 +1206,97 @@ class _BatteryScreenState extends State<BatteryScreen>
                     ),
                     onPressed: () => Navigator.pop(ctx),
                     child: const Text('Done',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showNodeSetupHelp() {
+    Widget heading(String text) => Padding(
+          padding: const EdgeInsets.only(top: 16, bottom: 8),
+          child: Text(text,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        );
+    Widget step(int n, String text) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 22,
+              height: 22,
+              alignment: Alignment.center,
+              decoration:
+                  const BoxDecoration(color: Yellor, shape: BoxShape.circle),
+              child: Text('$n',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Text(text, style: const TextStyle(fontSize: 14, height: 1.4))),
+          ]),
+        );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints:
+              BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.85),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('No nodes set up yet',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text(
+                    'A node is a small sensor on a battery. It sends the battery\'s voltage to a Raspberry Pi, and the Pi passes it to Marble. You need the Pi once, then one node per battery.',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600], height: 1.4)),
+                heading('1. Set up the Pi'),
+                step(1,
+                    'Use a Raspberry Pi with Bluetooth that has the Marble battery logger on it (ask your programming lead for the files). Plug it in near where your batteries are kept and connect it to wifi.'),
+                step(2,
+                    'The logger starts by itself when the Pi turns on. Give it a minute after power up.'),
+                step(3,
+                    'On a phone or laptop on the same wifi, open http://<your Pi\'s name>.local:8080 in a browser.'),
+                step(4,
+                    'Enter your team number and the same passcode you use for the battery tracker here, then tap Save and link.'),
+                heading('2. Set up a node'),
+                step(1,
+                    'Each node is an ESP32 board with an INA226 voltage sensor, wired to measure one battery.'),
+                step(2,
+                    'In the node\'s code, give it its own number (node 1, node 2 and so on) and make sure its secret matches the one on the Pi. Then upload it to the board.'),
+                step(3,
+                    'Power the node on and keep it within Bluetooth range of the Pi. It sends a reading about every 10 seconds.'),
+                step(4,
+                    'Come back to this button. The node shows up here once it has been heard. Pick which battery it is on. If the node number matches a battery\'s number, the Pi picks that battery for you.'),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: Yellor,
+                      foregroundColor: _nodeInk,
+                      side: const BorderSide(color: _nodeInk, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Got it',
                         style: TextStyle(fontWeight: FontWeight.w600)),
                   ),
                 ),
