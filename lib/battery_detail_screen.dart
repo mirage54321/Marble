@@ -474,16 +474,36 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
         ),
         if (!widget.isGuest) ...[
           const SizedBox(width: 8),
-          TapCursor(
-            onTap: () => _showMenu(b),
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                  color: YellorLight, borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.settings_outlined, color: Yellor, size: 18),
+          Column(mainAxisSize: MainAxisSize.min, children: [
+            TapCursor(
+              onTap: () => _showMenu(b),
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                    color: YellorLight, borderRadius: BorderRadius.circular(10)),
+                child:
+                    const Icon(Icons.settings_outlined, color: Yellor, size: 18),
+              ),
             ),
-          ),
+            if (widget.autoMode) ...[
+              const SizedBox(height: 8),
+              TapCursor(
+                onTap: () async {
+                  await widget.onFlag(b);
+                  if (mounted) setState(() {});
+                },
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                      color: YellorLight,
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.flag_outlined, color: Yellor, size: 18),
+                ),
+              ),
+            ],
+          ]),
         ],
       ]),
     );
@@ -504,9 +524,13 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
               await widget.onRename(b);
               if (mounted) setState(() {});
             }),
-            _menuTile(Icons.close, 'Delete', () {
+            _menuTile(Icons.delete_sweep_outlined, 'Delete data', () {
               Navigator.pop(ctx);
-              _confirmDelete(b);
+              _confirmDelete(b, dataOnly: true);
+            }),
+            _menuTile(Icons.close, 'Delete battery', () {
+              Navigator.pop(ctx);
+              _confirmDelete(b, dataOnly: false);
             }, color: redChar),
             const Divider(height: 8),
             _menuTile(null, 'Cancel', () => Navigator.pop(ctx),
@@ -533,31 +557,29 @@ class _BatteryDetailScreenState extends State<BatteryDetailScreen> {
     );
   }
 
-  Future<void> _confirmDelete(Battery b) async {
-    final choice = await showDialog<String>(
+  Future<void> _confirmDelete(Battery b, {required bool dataOnly}) async {
+    final yes = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete ${b.displayName}?'),
-        content: const Text(
-            'Delete battery removes it and everything recorded for it.\n\n'
-            'Delete its data keeps the battery but clears its robot logs and voltage readings.\n\n'
-            'This can\'t be undone.'),
+        title: Text(dataOnly
+            ? 'Delete data for ${b.displayName}?'
+            : 'Delete ${b.displayName}?'),
+        content: Text(dataOnly
+            ? 'This clears its robot logs, voltage readings and flags. The battery stays. This can\'t be undone.'
+            : 'This removes the battery and everything recorded for it. This can\'t be undone.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, 'data'),
-              child: const Text('Delete its data')),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           FilledButton(
               style: FilledButton.styleFrom(backgroundColor: redChar),
-              onPressed: () => Navigator.pop(ctx, 'battery'),
-              child: const Text('Delete battery')),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(dataOnly ? 'Delete data' : 'Delete battery')),
         ],
       ),
     );
-    if (choice == null || !mounted) return;
+    if (yes != true || !mounted) return;
 
-    final dataOnly = choice == 'data';
     final ok = await widget.onDelete(b, dataOnly: dataOnly);
     if (!ok || !mounted) return;
     if (!dataOnly) {

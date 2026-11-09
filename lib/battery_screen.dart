@@ -379,7 +379,7 @@ class _BatteryScreenState extends State<BatteryScreen>
 
 
 
-  bool get _showFlags => !_teamAuto;
+  bool get _showFlags => true;
 
   String? _recommendedLabel;
   String? _recommendReason;
@@ -1374,6 +1374,7 @@ class _BatteryScreenState extends State<BatteryScreen>
       if (dataOnly) {
         battery.lastVoltage = null;
         battery.lastVoltageAt = null;
+        battery.flags.clear();
       } else {
         _batteries = _batteries.where((x) => x.label != battery.label).toList();
       }
@@ -1385,6 +1386,98 @@ class _BatteryScreenState extends State<BatteryScreen>
     await _savePending();
     unawaited(_loadBatteries(silent: true));
     return true;
+  }
+
+  void _showBatteryMenu(Battery battery) {
+    if (_isGuest) return;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            _menuRow(Icons.edit_outlined, 'Rename battery', () {
+              Navigator.pop(ctx);
+              _renameBattery(battery);
+            }),
+            _menuRow(Icons.delete_sweep_outlined, 'Delete data', () {
+              Navigator.pop(ctx);
+              _confirmDeleteData(battery);
+            }),
+            _menuRow(Icons.close, 'Delete battery', () {
+              Navigator.pop(ctx);
+              _confirmDeleteBattery(battery);
+            }, color: redChar),
+            const Divider(height: 8),
+            _menuRow(null, 'Cancel', () => Navigator.pop(ctx),
+                color: Colors.grey[600]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _menuRow(IconData? icon, String label, VoidCallback onTap,
+      {Color? color}) {
+    final c = color ?? Colors.black87;
+    return TapCursor(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        child: Row(children: [
+          SizedBox(width: 22, child: icon == null ? null : Icon(icon, size: 20, color: c)),
+          const SizedBox(width: 14),
+          Text(label, style: TextStyle(fontSize: 15, color: c)),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _confirmDeleteData(Battery battery) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete data for ${battery.displayName}?'),
+        content: const Text(
+            'This clears its robot logs, voltage readings and flags. The battery stays. This can\'t be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: redChar),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete data')),
+        ],
+      ),
+    );
+    if (yes != true || !mounted) return;
+    await _deleteBattery(battery, dataOnly: true);
+  }
+
+  Future<void> _confirmDeleteBattery(Battery battery) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${battery.displayName}?'),
+        content: const Text(
+            'This removes the battery and everything recorded for it. This can\'t be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: redChar),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete battery')),
+        ],
+      ),
+    );
+    if (yes != true || !mounted) return;
+    await _deleteBattery(battery, dataOnly: false);
   }
 
   Future<void> _addBattery() async {
@@ -1519,7 +1612,7 @@ class _BatteryScreenState extends State<BatteryScreen>
 
 
 
-  Future<bool> _setMode(bool auto) async {
+  Future<bool> _setMode(bool auto, {String? collectorPassword}) async {
     try {
       final res = await http
           .post(Uri.parse('$_base/battery/mode'),
@@ -1528,6 +1621,8 @@ class _BatteryScreenState extends State<BatteryScreen>
                 'teamNumber': teamNum,
                 'passcode': _passcode,
                 'mode': auto ? 'auto' : 'manual',
+                if (collectorPassword != null)
+                  'collectorPassword': collectorPassword,
               }))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode != 200) throw StateError('mode ${res.statusCode}');
@@ -1543,17 +1638,31 @@ class _BatteryScreenState extends State<BatteryScreen>
       await prefs.setString('battery_mode_$teamNum', auto ? 'auto' : 'manual');
     } catch (_) {}
     if (!mounted) return true;
+    _mutations++;
     setState(() {
       _teamAuto = auto;
       _autoMode = auto && !_isGuest;
       _collectorConnected = false;
       _recommendedLabel = null;
       _recommendReason = null;
+      _pending = [];
+      for (final b in _batteries) {
+        b.isCharging = false;
+        b.isInUse = false;
+        b.chargedAt = null;
+        b.lastUsedAt = DateTime.fromMillisecondsSinceEpoch(0);
+      }
     });
+    await _savePending();
+    unawaited(_loadBatteries(silent: true));
     return true;
   }
 
   Future<bool> _openConnectorSetup({bool instructionsOnly = false}) async {
+    if (instructionsOnly) {
+      final unlocked = await promptCollectorPassword(context);
+      if (unlocked == null || !mounted) return false;
+    }
     final done = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -1567,8 +1676,12 @@ class _BatteryScreenState extends State<BatteryScreen>
   Future<void> _startConnectorSetup() async {
     final wasAuto = _teamAuto;
 
-
-    if (!wasAuto && !await _setMode(true)) return;
+    String? unlocked;
+    if (!wasAuto) {
+      unlocked = await promptCollectorPassword(context);
+      if (unlocked == null || !mounted) return;
+      if (!await _setMode(true, collectorPassword: unlocked)) return;
+    }
     final done = await _openConnectorSetup();
 
 
@@ -1769,6 +1882,16 @@ class _BatteryScreenState extends State<BatteryScreen>
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 255, 255, 248),
       floatingActionButton: _isGuest || !_teamAuto ? null : _nodesButton(),
+      bottomNavigationBar: _teamAuto && !_isLoading
+          ? SafeArea(
+              top: false,
+              child: Container(
+                color: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: _legend(),
+              ),
+            )
+          : null,
       body: SafeArea(
         child: Column(children: [
           _topBar(),
@@ -1937,9 +2060,6 @@ class _BatteryScreenState extends State<BatteryScreen>
   }
 
   Widget _list() {
-    // The node grid is designed for Marble Connector Desktop teams. Manual
-    // teams keep the hand-operated tracker: its full status rows and Use /
-    // Charge buttons make a busy competition pit much quicker to work in.
     return _teamAuto ? _automaticList() : _manualList();
   }
 
@@ -1951,8 +2071,6 @@ class _BatteryScreenState extends State<BatteryScreen>
       const SizedBox(height: 16),
       _grid(),
       const SizedBox(height: 18),
-      _legend(),
-      const SizedBox(height: 14),
       if (!_isGuest) _addButton(),
       const SizedBox(height: 16),
     ]);
@@ -1970,9 +2088,6 @@ class _BatteryScreenState extends State<BatteryScreen>
           child: Text('All batteries',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.grey[600])),
         ),
-        if (!_isGuest)
-          Text('tap a name to rename',
-              style: TextStyle(fontSize: 11, color: Colors.grey[400])),
       ]),
       const SizedBox(height: 8),
       ..._batteries.map(_manualBatteryTile),
@@ -2094,7 +2209,7 @@ class _BatteryScreenState extends State<BatteryScreen>
           border: Border.all(color: Colors.black.withValues(alpha: 0.07), width: 0.5)),
       child: Row(children: [
         TapCursor(
-          onTap: _isGuest ? () => _openDetail(battery) : () => _renameBattery(battery),
+          onTap: _isGuest ? () => _openDetail(battery) : null,
           child: Container(
             width: 58, height: 46,
             decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
@@ -2146,6 +2261,9 @@ class _BatteryScreenState extends State<BatteryScreen>
           TapCursor(onTap: () => _flagWeak(battery), child: Padding(
               padding: const EdgeInsets.all(8),
               child: Icon(Icons.flag_outlined, size: 16, color: Colors.grey[500]))),
+          TapCursor(onTap: () => _showBatteryMenu(battery), child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(Icons.settings_outlined, size: 18, color: Colors.grey[500]))),
         ],
       ]),
     );

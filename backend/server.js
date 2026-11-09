@@ -17,6 +17,7 @@ const app = express();
 app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3000;
+const COLLECTOR_PASSWORD = process.env.COLLECTOR_PASSWORD;
 const MONGODB_URI = process.env.MONGODB_URI;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_SEGMENT_API_KEYS = [
@@ -1210,6 +1211,36 @@ function rejectIfAutoMode(team, res) {
   return true;
 }
 
+function collectorPasswordOk(candidate) {
+  if (!COLLECTOR_PASSWORD) return false;
+  if (typeof candidate !== 'string' || !candidate) return false;
+  return safeEqual(candidate, COLLECTOR_PASSWORD);
+}
+
+app.post('/battery/collector/unlock', async (req, res) => {
+  try {
+    const teamNumber = cleanString(req.body.teamNumber);
+    if (teamNumber && authIsBlocked(req, `collector:${teamNumber}`)) {
+      return sendRateLimited(res);
+    }
+    const team = await checkTeamAuth(req, res);
+    if (!team) return;
+
+    if (!COLLECTOR_PASSWORD) {
+      return res.status(503).json({ code: 'COLLECTOR_UNAVAILABLE', error: 'The collector is not available yet' });
+    }
+    if (!collectorPasswordOk(req.body.collectorPassword)) {
+      recordAuthFailure(req, `collector:${team.teamNumber}`);
+      return res.status(403).json({ code: 'COLLECTOR_LOCKED', error: 'Wrong collector passcode' });
+    }
+    clearAuthFailures(req, `collector:${team.teamNumber}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Collector unlock error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/battery/mode', async (req, res) => {
   try {
     const team = await checkTeamAuth(req, res);
@@ -1220,6 +1251,14 @@ app.post('/battery/mode', async (req, res) => {
       return res.status(400).json({ error: "mode must be 'auto' or 'manual'" });
     }
 
+    const modeChanged = teamMode(team) !== mode;
+
+    if (mode === 'auto' && modeChanged) {
+      if (!collectorPasswordOk(req.body.collectorPassword)) {
+        return res.status(403).json({ code: 'COLLECTOR_LOCKED', error: 'Wrong collector passcode' });
+      }
+    }
+
     const update = { batteryMode: mode, batteryModeSetAt: new Date().toISOString() };
 
     const unset = { connectorLastSeenAt: '' };
@@ -1227,6 +1266,20 @@ app.post('/battery/mode', async (req, res) => {
       { teamNumber: team.teamNumber },
       { $set: update, $unset: unset },
     );
+
+    if (modeChanged) {
+      await batteriesCollection.updateMany(
+        { teamNumber: team.teamNumber },
+        {
+          $set: {
+            isCharging: false,
+            isInUse: false,
+            lastUsedAt: new Date(0).toISOString(),
+          },
+          $unset: { chargedAt: '' },
+        },
+      );
+    }
     res.json({ ok: true, mode });
   } catch (err) {
     console.error('Battery mode error:', err);
@@ -2082,7 +2135,7 @@ app.delete('/battery/:label/data', async (req, res) => {
     const readings = await batteryReadingsCollection.deleteMany(scope);
     await batteriesCollection.updateOne(
       { teamNumber: team.teamNumber, label },
-      { $unset: { lastVoltage: '', lastVoltageAt: '' } },
+      { $set: { flags: [] }, $unset: { lastVoltage: '', lastVoltageAt: '' } },
     );
     res.json({ ok: true, deletedLogs: telemetry.deletedCount, deletedReadings: readings.deletedCount });
   } catch (err) {

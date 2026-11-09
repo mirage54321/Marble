@@ -312,3 +312,104 @@ class _ConnectorSetupScreenState extends State<ConnectorSetupScreen> {
     );
   }
 }
+
+Future<String?> promptCollectorPassword(BuildContext context) async {
+  String? team;
+  String? pass;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    team = prefs.getString('battery_team');
+    pass = prefs.getString('battery_passcode');
+  } catch (_) {}
+  if (!context.mounted) return null;
+
+  final ctrl = TextEditingController();
+  String? error;
+  bool checking = false;
+
+  final result = await showDialog<String>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setD) {
+        Future<void> submit() async {
+          final entered = ctrl.text.trim();
+          if (entered.isEmpty || checking) return;
+          if (team == null || pass == null) {
+            setD(() => error = 'Log in to your team first');
+            return;
+          }
+          setD(() {
+            checking = true;
+            error = null;
+          });
+          try {
+            final res = await http
+                .post(Uri.parse('$_kBase/battery/collector/unlock'),
+                    headers: {'Content-Type': 'application/json'},
+                    body: jsonEncode({
+                      'teamNumber': team,
+                      'passcode': pass,
+                      'collectorPassword': entered,
+                    }))
+                .timeout(const Duration(seconds: 15));
+            if (res.statusCode == 200) {
+              if (ctx.mounted) Navigator.pop(ctx, entered);
+              return;
+            }
+            String message = 'Could not check the passcode';
+            try {
+              message = (jsonDecode(res.body) as Map<String, dynamic>)['error']
+                      as String? ??
+                  message;
+            } catch (_) {}
+            setD(() {
+              checking = false;
+              error = res.statusCode == 403 ? 'Wrong passcode' : message;
+            });
+          } catch (_) {
+            setD(() {
+              checking = false;
+              error = 'Could not connect, try again';
+            });
+          }
+        }
+
+        return AlertDialog(
+          title: const Text('Marble Collector'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'The Marble Collector is going to do it all. The Collector is still in alpha. Enter the passcode to continue.'),
+              const SizedBox(height: 14),
+              TextField(
+                controller: ctrl,
+                obscureText: true,
+                autofocus: true,
+                onSubmitted: (_) => submit(),
+                decoration: InputDecoration(
+                  labelText: 'Passcode',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  errorText: error,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: _kYellow),
+              onPressed: checking ? null : submit,
+              child: Text(checking ? 'Checking…' : 'Continue'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+  return result;
+}
